@@ -89,6 +89,123 @@
         <h2>Available Models</h2>
       </div>
 
+      <!-- Model Summary Cards -->
+      <div class="summary-cards">
+        <div class="summary-card">
+          <div class="card-icon">
+            <span class="material-icons-round">smart_toy</span>
+          </div>
+          <div class="card-content">
+            <h3>{{ models.length }}</h3>
+            <p>Total Models</p>
+          </div>
+        </div>
+        <div class="summary-card">
+          <div class="card-icon">
+            <span class="material-icons-round">trending_up</span>
+          </div>
+          <div class="card-content">
+            <h3>{{ topModel?.name || 'N/A' }}</h3>
+            <p>Top Model</p>
+          </div>
+        </div>
+        <div class="summary-card">
+          <div class="card-icon">
+            <span class="material-icons-round">memory</span>
+          </div>
+          <div class="card-content">
+            <h3>{{ averageParameters }}</h3>
+            <p>Avg Parameters</p>
+          </div>
+        </div>
+        <div class="summary-card">
+          <div class="card-icon">
+            <span class="material-icons-round">speed</span>
+          </div>
+          <div class="card-content">
+            <h3>{{ averageContextLength }}</h3>
+            <p>Avg Context</p>
+          </div>
+        </div>
+        <div class="summary-card">
+          <div class="card-icon">
+            <span class="material-icons-round">category</span>
+          </div>
+          <div class="card-content">
+            <h3>{{ uniqueArchitectures }}</h3>
+            <p>Architectures</p>
+          </div>
+        </div>
+        <div class="summary-card">
+          <div class="card-icon">
+            <span class="material-icons-round">code</span>
+          </div>
+          <div class="card-content">
+            <h3>{{ codingModels }}</h3>
+            <p>Coding Models</p>
+          </div>
+        </div>
+        <div class="summary-card">
+          <div class="card-icon">
+            <span class="material-icons-round">visibility</span>
+          </div>
+          <div class="card-content">
+            <h3>{{ visionModels }}</h3>
+            <p>Vision Models</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Model Rankings -->
+      <div class="rankings-section">
+        <div class="section-header">
+          <h3>
+            <span class="material-icons-round">emoji_events</span>
+            Model Rankings
+          </h3>
+          <p>Top performing models by parameters and capabilities</p>
+        </div>
+        
+        <div class="rankings-grid">
+          <div 
+            v-for="(model, index) in rankedModels.slice(0, 7)" 
+            :key="model.name"
+            class="ranking-card"
+            :class="{ 'top-rank': index === 0 }"
+          >
+            <div class="rank-number">
+              <span class="rank-badge" :class="getRankClass(index)">{{ index + 1 }}</span>
+            </div>
+            <div class="model-info">
+              <h4>{{ model.name }}</h4>
+              <div class="model-stats">
+                <span class="stat">
+                  <span class="material-icons-round">memory</span>
+                  {{ model.details?.parameters || 'N/A' }}
+                </span>
+                <span class="stat">
+                  <span class="material-icons-round">speed</span>
+                  {{ formatNumber(model.details?.context_length) }}
+                </span>
+              </div>
+              <div class="model-capabilities">
+                <span 
+                  v-for="capability in model.details?.capabilities?.slice(0, 3)" 
+                  :key="capability"
+                  class="capability-tag"
+                >
+                  {{ capability }}
+                </span>
+              </div>
+            </div>
+            <div class="rank-score">
+              <div class="score">{{ calculateModelScore(model) }}</div>
+              <div class="score-label">Score</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
     <div class="models-grid">
       <div 
         v-for="model in filteredModels" 
@@ -434,7 +551,8 @@ export default {
         'Question Answering',
         'Sentiment Analysis'
       ],
-      isLoadingModels: false
+      isLoadingModels: false,
+      modelDetails: {} // Store detailed model information
     };
   },
   computed: {
@@ -445,6 +563,111 @@ export default {
         return this.deploymentConfig.endpoint.trim() !== '';
       }
       return false;
+    },
+    
+    // Summary Cards Computed Properties
+    topModel() {
+      const modelsWithDetails = this.modelsWithDetails;
+      console.log('Computing topModel from', modelsWithDetails.length, 'models');
+      if (modelsWithDetails.length === 0) return null;
+      const top = modelsWithDetails.reduce((top, model) => {
+        const currentScore = this.calculateModelScore(model);
+        const topScore = this.calculateModelScore(top);
+        return currentScore > topScore ? model : top;
+      });
+      console.log('Top model:', top?.name, 'Score:', this.calculateModelScore(top));
+      return top;
+    },
+    
+    averageParameters() {
+      const modelsWithDetails = this.modelsWithDetails;
+      console.log('Computing averageParameters from', modelsWithDetails.length, 'models');
+      if (modelsWithDetails.length === 0) return 'N/A';
+      const total = modelsWithDetails.reduce((sum, model) => {
+        const params = this.parseParameters(model.details?.parameters || '0B');
+        console.log(`Model ${model.name}: ${model.details?.parameters} -> ${params}`);
+        return sum + params;
+      }, 0);
+      const avg = total / modelsWithDetails.length;
+      const result = avg >= 1 ? `${avg.toFixed(1)}B` : `${(avg * 1000).toFixed(0)}M`;
+      console.log('Average parameters:', result);
+      return result;
+    },
+    
+    averageContextLength() {
+      if (this.modelsWithDetails.length === 0) return 'N/A';
+      const total = this.modelsWithDetails.reduce((sum, model) => {
+        return sum + (model.details?.context_length || 0);
+      }, 0);
+      const avg = total / this.modelsWithDetails.length;
+      return this.formatNumber(Math.round(avg));
+    },
+    
+    uniqueArchitectures() {
+      const architectures = new Set();
+      this.modelsWithDetails.forEach(model => {
+        if (model.details?.architecture) {
+          architectures.add(model.details.architecture);
+        }
+      });
+      return architectures.size;
+    },
+    
+    codingModels() {
+      const modelsWithDetails = this.modelsWithDetails;
+      const coding = modelsWithDetails.filter(model => {
+        // Check both the basic capabilities and detailed capabilities
+        const basicCaps = model.capabilities || [];
+        const detailedCaps = model.details?.capabilities || [];
+        const allCaps = [...basicCaps, ...detailedCaps];
+        
+        return allCaps.some(cap => 
+          cap.toLowerCase().includes('code') || 
+          cap.toLowerCase().includes('coding') ||
+          cap.toLowerCase().includes('debug')
+        );
+      });
+      console.log('Coding models:', coding.length, coding.map(m => m.name));
+      return coding.length;
+    },
+    
+    visionModels() {
+      const modelsWithDetails = this.modelsWithDetails;
+      const vision = modelsWithDetails.filter(model => {
+        // Check both the basic capabilities and detailed capabilities
+        const basicCaps = model.capabilities || [];
+        const detailedCaps = model.details?.capabilities || [];
+        const allCaps = [...basicCaps, ...detailedCaps];
+        
+        return allCaps.some(cap => 
+          cap.toLowerCase().includes('visual') || 
+          cap.toLowerCase().includes('vision') ||
+          cap.toLowerCase().includes('image')
+        );
+      });
+      console.log('Vision models:', vision.length, vision.map(m => m.name));
+      return vision.length;
+    },
+    
+    // Model Rankings
+    rankedModels() {
+      return [...this.modelsWithDetails].sort((a, b) => {
+        const scoreA = this.calculateModelScore(a);
+        const scoreB = this.calculateModelScore(b);
+        return scoreB - scoreA; // Descending order (highest first)
+      });
+    },
+    
+    modelsWithDetails() {
+      console.log('Computing modelsWithDetails:', this.models.length, 'models,', Object.keys(this.modelDetails).length, 'details');
+      return this.models.map(model => {
+        const details = this.modelDetails[model.name] || null;
+        console.log(`Model ${model.name} details:`, details);
+        return {
+          ...model,
+          details: details
+        };
+      });
     },
     filteredModels() {
       let filtered = [...this.models];
@@ -478,6 +701,90 @@ export default {
     }
   },
   methods: {
+    // Model Details and Scoring Methods
+    async loadModelDetails() {
+      console.log('Loading model details for', this.models.length, 'models');
+      for (const model of this.models) {
+        try {
+          console.log(`Loading details for: ${model.name}`);
+          const response = await fetch(`http://localhost:5000/api/models/${model.name}/details`);
+          const data = await response.json();
+          if (data.success) {
+            // Use Vue 3 reactivity
+            this.modelDetails[model.name] = data.details;
+            console.log(`Loaded details for ${model.name}:`, data.details);
+          } else {
+            console.error(`Failed to load details for ${model.name}:`, data.error);
+          }
+        } catch (error) {
+          console.error(`Failed to load details for ${model.name}:`, error);
+        }
+      }
+      console.log('All model details loaded:', this.modelDetails);
+    },
+    
+    calculateModelScore(model) {
+      if (!model.details) {
+        console.log(`No details for ${model.name}, score: 0`);
+        return 0;
+      }
+      
+      let score = 0;
+      
+      // Parameter score (0-40 points)
+      const params = this.parseParameters(model.details.parameters || '0B');
+      const paramScore = Math.min(params * 2, 40);
+      score += paramScore;
+      
+      // Context length score (0-30 points)
+      const contextLength = model.details.context_length || 0;
+      const contextScore = Math.min(contextLength / 10000, 30);
+      score += contextScore;
+      
+      // Capabilities score (0-20 points)
+      const basicCaps = model.capabilities || [];
+      const detailedCaps = model.details.capabilities || [];
+      const allCaps = [...basicCaps, ...detailedCaps];
+      const capScore = Math.min(allCaps.length * 5, 20);
+      score += capScore;
+      
+      // Architecture bonus (0-10 points)
+      const architecture = model.details.architecture?.toLowerCase() || '';
+      let archScore = 3;
+      if (architecture.includes('llama')) archScore = 8;
+      else if (architecture.includes('gemma')) archScore = 7;
+      else if (architecture.includes('mistral')) archScore = 6;
+      else if (architecture.includes('qwen')) archScore = 5;
+      score += archScore;
+      
+      const finalScore = Math.round(score);
+      console.log(`Score for ${model.name}: params=${paramScore}, context=${contextScore}, caps=${capScore}, arch=${archScore}, total=${finalScore}`);
+      return finalScore;
+    },
+    
+    getRankClass(index) {
+      if (index === 0) return 'rank-gold';
+      if (index === 1) return 'rank-silver';
+      if (index === 2) return 'rank-bronze';
+      return 'rank-normal';
+    },
+    
+    parseParameters(paramStr) {
+      if (!paramStr) return 0;
+      const match = paramStr.match(/(\d+\.?\d*)([BM])/);
+      if (match) {
+        const value = parseFloat(match[1]);
+        const unit = match[2];
+        return unit === 'B' ? value : value / 1000;
+      }
+      return 0;
+    },
+    
+    formatNumber(num) {
+      if (!num) return 'N/A';
+      return num.toLocaleString();
+    },
+    
     formatTimeAgo(dateString) {
       if (!dateString) return '';
       
@@ -788,6 +1095,9 @@ export default {
         
         console.log('Loaded local models:', this.models);
         console.log('Models loaded successfully:', this.models.length);
+        
+        // Load model details after models are loaded
+        await this.loadModelDetails();
       } catch (error) {
         console.error('Failed to fetch local models:', error);
         console.error('Error details:', error.message);
@@ -1433,5 +1743,213 @@ export default {
     margin: 1rem;
     max-height: calc(100vh - 2rem);
   }
+  
+  .summary-cards {
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  }
+  
+  .rankings-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Summary Cards */
+.summary-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.summary-card {
+  background: var(--card-bg, #ffffff);
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--border-color, #e9ecef);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.summary-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+.card-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  background: linear-gradient(135deg, #007bff, #0056b3);
+  border-radius: 12px;
+  margin-bottom: 1rem;
+}
+
+.card-icon .material-icons-round {
+  color: white;
+  font-size: 24px;
+}
+
+.card-content h3 {
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: var(--text-color, #2c3e50);
+  margin: 0 0 0.5rem 0;
+}
+
+.card-content p {
+  color: var(--text-muted, #6c757d);
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+/* Rankings Section */
+.rankings-section {
+  margin-bottom: 2rem;
+}
+
+.rankings-section .section-header {
+  margin-bottom: 1.5rem;
+}
+
+.rankings-section .section-header h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.5rem 0;
+  color: var(--text-color, #2c3e50);
+}
+
+.rankings-section .section-header p {
+  color: var(--text-muted, #6c757d);
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.rankings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1rem;
+}
+
+.ranking-card {
+  background: var(--card-bg, #ffffff);
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--border-color, #e9ecef);
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.ranking-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+.ranking-card.top-rank {
+  border: 2px solid #ffd700;
+  background: linear-gradient(135deg, #fff9e6, #ffffff);
+}
+
+.rank-number {
+  flex-shrink: 0;
+}
+
+.rank-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: white;
+}
+
+.rank-gold {
+  background: linear-gradient(135deg, #ffd700, #ffed4e);
+  color: #8b6914;
+}
+
+.rank-silver {
+  background: linear-gradient(135deg, #c0c0c0, #e8e8e8);
+  color: #666;
+}
+
+.rank-bronze {
+  background: linear-gradient(135deg, #cd7f32, #daa520);
+  color: white;
+}
+
+.rank-normal {
+  background: linear-gradient(135deg, #6c757d, #868e96);
+  color: white;
+}
+
+.model-info {
+  flex: 1;
+}
+
+.model-info h4 {
+  margin: 0 0 0.5rem 0;
+  color: var(--text-color, #2c3e50);
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.model-stats {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.stat {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  color: var(--text-muted, #6c757d);
+}
+
+.stat .material-icons-round {
+  font-size: 16px;
+}
+
+.model-capabilities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.capability-tag {
+  background: #e9ecef;
+  color: #495057;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+}
+
+.rank-score {
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.score {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--primary-color, #007bff);
+  margin: 0;
+}
+
+.score-label {
+  font-size: 0.75rem;
+  color: var(--text-muted, #6c757d);
+  margin: 0;
 }
 </style>

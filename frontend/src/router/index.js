@@ -3,6 +3,7 @@ import { createRouter, createWebHistory } from 'vue-router';
 // Lazy load components for better performance
 const Dashboard = () => import('@/views/Dashboard.vue');
 const Models = () => import('@/views/Models.vue');
+const ModelComparison = () => import('@/views/ModelComparison.vue');
 const Training = () => import('@/views/Training.vue');
 const Datasets = () => import('@/views/Datasets.vue');
 const Evaluation = () => import('@/views/Evaluation.vue');
@@ -23,6 +24,12 @@ const routes = [
     name: 'Models',
     component: Models,
     meta: { title: 'Models' }
+  },
+  {
+    path: '/model-comparison',
+    name: 'ModelComparison',
+    component: ModelComparison,
+    meta: { title: 'Model Comparison' }
   },
   {
     path: '/training',

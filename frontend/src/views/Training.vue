@@ -624,18 +624,56 @@ export default {
             progress: Math.round(job.progress * 100), // Convert to percentage
             currentEpoch: Math.floor(job.progress * (job.config?.params?.epochs || 10)),
             totalEpochs: job.config?.params?.epochs || 10,
-            elapsedTime: 0, // Calculate from timestamps if needed
+            elapsedTime: this.calculateElapsedTime(job.started_at),
             type: job.training_type,
-            config: job.config || {}
+            config: job.config || {},
+            errorMessage: job.error_message || null,
+            isStuck: this.isJobStuck(job)
           }));
           
           console.log(`Loaded ${this.trainingJobs.length} training jobs from API`);
+          
+          // Check for stuck jobs and auto-detect them
+          await this.detectStuckJobs();
         } else {
           console.error('Failed to fetch training jobs:', result.error);
         }
       } catch (error) {
         console.error('Error fetching training jobs:', error);
         // Don't show error to user, just log it
+      }
+    },
+    
+    calculateElapsedTime(startedAt) {
+      if (!startedAt) return 0;
+      const start = new Date(startedAt);
+      const now = new Date();
+      return Math.floor((now - start) / (1000 * 60)); // minutes
+    },
+    
+    isJobStuck(job) {
+      if (job.status !== 'RUNNING') return false;
+      
+      const elapsedMinutes = this.calculateElapsedTime(job.started_at);
+      const timeoutMinutes = job.training_type === 'LoRA' ? 30 : 10;
+      
+      return elapsedMinutes > timeoutMinutes && job.progress < 0.5;
+    },
+    
+    async detectStuckJobs() {
+      try {
+        const response = await fetch('http://localhost:5000/api/detect-stuck-training', {
+          method: 'POST'
+        });
+        const result = await response.json();
+        
+        if (result.success && result.stuck_jobs_found > 0) {
+          console.log(`Detected ${result.stuck_jobs_found} stuck training jobs`);
+          // Refresh the training jobs list
+          await this.fetchTrainingJobs();
+        }
+      } catch (error) {
+        console.error('Error detecting stuck jobs:', error);
       }
     },
     async fetchOllamaModels() {

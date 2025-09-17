@@ -605,6 +605,155 @@ def get_ollama_models():
             'error': str(e)
         }), 500
 
+@app.route('/api/models/<model_name>/details', methods=['GET'])
+def get_model_details(model_name):
+    """Get detailed information about a specific model"""
+    try:
+        # Get model details using ollama show
+        result = subprocess.run(['ollama', 'show', model_name], capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return jsonify({
+                'success': False,
+                'error': f'Failed to get details for model: {model_name}'
+            }), 404
+        
+        # Parse the output
+        details = parse_model_details(result.stdout)
+        
+        return jsonify({
+            'success': True,
+            'model_name': model_name,
+            'details': details
+        })
+        
+    except subprocess.TimeoutExpired:
+        return jsonify({
+            'success': False,
+            'error': 'Timeout getting model details'
+        }), 408
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+def parse_model_details(output):
+    """Parse ollama show output into structured data"""
+    details = {
+        'architecture': None,
+        'parameters': None,
+        'context_length': None,
+        'embedding_length': None,
+        'quantization': None,
+        'capabilities': [],
+        'parameters_config': {},
+        'license': None,
+        'tokens': None,  # Will be calculated/estimated
+        'training_data_size': None,
+        'vocab_size': None
+    }
+    
+    lines = output.split('\n')
+    current_section = None
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+            
+        # Detect sections
+        if line == 'Model':
+            current_section = 'model'
+            continue
+        elif line == 'Capabilities':
+            current_section = 'capabilities'
+            continue
+        elif line == 'Parameters':
+            current_section = 'parameters'
+            continue
+        elif line == 'License':
+            current_section = 'license'
+            continue
+        
+        # Parse content based on current section
+        if current_section == 'model' and line.strip() and not line.startswith(' '):
+            # Handle format: "architecture        llama" or "context length      131072"
+            parts = line.split()
+            if len(parts) >= 2:
+                # Handle multi-word keys like "context length"
+                if len(parts) >= 3 and parts[1] == 'length':
+                    key = f"{parts[0]}_{parts[1]}".lower()
+                    value = parts[2]
+                else:
+                    key = parts[0].lower().replace(' ', '_')
+                    value = ' '.join(parts[1:]).strip()
+                
+                if key == 'architecture':
+                    details['architecture'] = value
+                elif key == 'parameters':
+                    details['parameters'] = value
+                elif key == 'context_length':
+                    details['context_length'] = int(value)
+                elif key == 'embedding_length':
+                    details['embedding_length'] = int(value)
+                elif key == 'quantization':
+                    details['quantization'] = value
+                
+        elif current_section == 'capabilities':
+            if line and not line.startswith(' ') and line.strip():
+                details['capabilities'].append(line.strip())
+                
+        elif current_section == 'parameters' and ':' in line:
+            key, value = line.split(':', 1)
+            details['parameters_config'][key.strip()] = value.strip()
+            
+        elif current_section == 'license':
+            if not details['license']:
+                details['license'] = line
+            else:
+                details['license'] += ' ' + line
+    
+    # Estimate tokens and other metrics based on parameters
+    if details['parameters']:
+        try:
+            param_str = details['parameters'].replace('B', '').replace('M', '')
+            if 'B' in details['parameters']:
+                params = float(param_str) * 1_000_000_000
+            elif 'M' in details['parameters']:
+                params = float(param_str) * 1_000_000
+            else:
+                params = float(param_str)
+            
+            # Rough estimations based on model size
+            # Training tokens: typically 1-2 tokens per parameter
+            estimated_tokens = int(params * 1.5)  # Conservative estimate
+            details['tokens'] = f"{estimated_tokens:,}"
+            
+            # Training data size estimation
+            if params > 10_000_000_000:  # >10B params
+                details['training_data_size'] = "~2-3 trillion tokens"
+            elif params > 1_000_000_000:  # >1B params
+                details['training_data_size'] = "~200-500 billion tokens"
+            elif params > 100_000_000:  # >100M params
+                details['training_data_size'] = "~20-50 billion tokens"
+            else:
+                details['training_data_size'] = "~2-5 billion tokens"
+            
+            # Vocabulary size estimation
+            if 'llama' in details.get('architecture', '').lower():
+                details['vocab_size'] = "128,256"
+            elif 'gemma' in details.get('architecture', '').lower():
+                details['vocab_size'] = "256,000"
+            else:
+                details['vocab_size'] = "~50,000-256,000"
+                
+        except:
+            details['tokens'] = 'Unknown'
+            details['training_data_size'] = 'Unknown'
+            details['vocab_size'] = 'Unknown'
+    
+    return details
+
 # ChromaDB API Endpoints
 @app.route('/api/chromadb/collections', methods=['GET'])
 def get_chromadb_collections():
@@ -731,6 +880,57 @@ def health_check():
             'error': str(e),
             'database': 'disconnected',
             'chromadb': 'disconnected'
+        }), 500
+
+@app.route('/api/detect-stuck-training', methods=['POST'])
+def detect_stuck_training():
+    """Detect and fix stuck training jobs"""
+    try:
+        import time
+        from datetime import datetime, timedelta
+        
+        # Get all running training jobs
+        jobs = db.get_training_jobs()
+        stuck_jobs = []
+        
+        for job in jobs:
+            if job['status'] == 'RUNNING':
+                started_at = job.get('started_at')
+                if started_at:
+                    start_time = datetime.fromisoformat(started_at)
+                    elapsed = datetime.now() - start_time
+                    
+                    # Check if job has been running too long
+                    timeout_minutes = 30 if job['training_type'] == 'LoRA' else 10
+                    
+                    if elapsed > timedelta(minutes=timeout_minutes):
+                        # Check if progress hasn't changed in last 5 minutes
+                        if job['progress'] < 0.5:  # Less than 50% progress
+                            stuck_jobs.append({
+                                'job_id': job['id'],
+                                'job_name': job['name'],
+                                'elapsed_minutes': int(elapsed.total_seconds() / 60),
+                                'progress': job['progress']
+                            })
+        
+        # Mark stuck jobs as failed
+        for stuck_job in stuck_jobs:
+            db.update_training_job(stuck_job['job_id'], {
+                'status': 'FAILED',
+                'error_message': f'Training stuck for {stuck_job["elapsed_minutes"]} minutes with {stuck_job["progress"]*100:.1f}% progress'
+            })
+        
+        return jsonify({
+            'success': True,
+            'stuck_jobs_found': len(stuck_jobs),
+            'stuck_jobs': stuck_jobs,
+            'message': f'Found and fixed {len(stuck_jobs)} stuck training jobs'
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
         }), 500
 
 if __name__ == '__main__':
