@@ -8,6 +8,7 @@ import json
 import os
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
+from flask_socketio import SocketIO, emit
 import subprocess
 import sys
 from dataset_loader import load_any_dataset
@@ -19,6 +20,7 @@ from datetime import datetime
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend
+socketio = SocketIO(app, cors_allowed_origins="*")  # Enable SocketIO with CORS
 
 # Global variables - removed old datasets_info system
 
@@ -273,20 +275,87 @@ def update_training_job(job_id):
 
 @app.route('/api/training-jobs/<int:job_id>', methods=['DELETE'])
 def delete_training_job(job_id):
-    """Delete a training job"""
+    """Delete a training job and clean up associated resources"""
     try:
+        # Get job details before deletion for cleanup
+        job = db.get_training_job(job_id)
+        if not job:
+            return jsonify({
+                'success': False,
+                'error': 'Job not found'
+            }), 404
+        
+        # Clean up associated resources
+        cleanup_results = []
+        
+        # 1. Delete ChromaDB collection if it's a RAG training job
+        if job.get('training_type') == 'rag':
+            try:
+                collection_name = f"knowledge_base_job_{job_id}"
+                chromadb_deleted = chromadb_service.delete_collection(collection_name)
+                cleanup_results.append(f"ChromaDB collection '{collection_name}': {'deleted' if chromadb_deleted else 'not found'}")
+            except Exception as e:
+                cleanup_results.append(f"ChromaDB cleanup error: {str(e)}")
+        
+        # 2. Delete model files if job was completed
+        if job.get('status') == 'COMPLETED' and job.get('model_name'):
+            try:
+                import os
+                import shutil
+                model_name = job.get('model_name', '').replace(':', '_').replace('/', '_')
+                model_dir = f"models/{model_name}"
+                
+                if os.path.exists(model_dir):
+                    shutil.rmtree(model_dir)
+                    cleanup_results.append(f"Model directory '{model_dir}': deleted")
+                else:
+                    cleanup_results.append(f"Model directory '{model_dir}': not found")
+                    
+                # Also try to remove from Ollama if possible
+                try:
+                    import subprocess
+                    ollama_model_name = job.get('model_name')
+                    if ollama_model_name:
+                        result = subprocess.run(['ollama', 'rm', ollama_model_name], 
+                                              capture_output=True, text=True, timeout=10)
+                        if result.returncode == 0:
+                            cleanup_results.append(f"Ollama model '{ollama_model_name}': removed")
+                        else:
+                            cleanup_results.append(f"Ollama model '{ollama_model_name}': not found or error")
+                except Exception as e:
+                    cleanup_results.append(f"Ollama cleanup error: {str(e)}")
+                    
+            except Exception as e:
+                cleanup_results.append(f"Model file cleanup error: {str(e)}")
+        
+        # 3. Delete training data directory
+        try:
+            import os
+            import shutil
+            train_data_dir = f"training_data/job_{job_id}"
+            if os.path.exists(train_data_dir):
+                shutil.rmtree(train_data_dir)
+                cleanup_results.append(f"Training data directory '{train_data_dir}': deleted")
+            else:
+                cleanup_results.append(f"Training data directory '{train_data_dir}': not found")
+        except Exception as e:
+            cleanup_results.append(f"Training data cleanup error: {str(e)}")
+        
+        # 4. Delete from database
         success = db.delete_training_job(job_id)
         
         if success:
             return jsonify({
                 'success': True,
-                'message': 'Training job deleted successfully'
+                'message': 'Training job deleted successfully',
+                'cleanup_results': cleanup_results,
+                'job_name': job.get('name', 'Unknown')
             })
         else:
             return jsonify({
                 'success': False,
-                'error': 'Job not found'
-            }), 404
+                'error': 'Failed to delete job from database'
+            }), 500
             
     except Exception as e:
         return jsonify({
@@ -882,6 +951,61 @@ def health_check():
             'chromadb': 'disconnected'
         }), 500
 
+@app.route('/api/training-jobs/<int:job_id>/progress', methods=['POST'])
+def update_training_progress(job_id):
+    """Update training progress for a specific job with detailed step information"""
+    try:
+        data = request.get_json()
+        progress = data.get('progress', 0.0)
+        
+        # Prepare update data with detailed progress info
+        update_data = {'progress': progress}
+        
+        # Add detailed progress information if available
+        if 'current_step' in data:
+            update_data['current_step'] = data['current_step']
+        if 'total_steps' in data:
+            update_data['total_steps'] = data['total_steps']
+        if 'epoch' in data:
+            update_data['current_epoch'] = data['epoch']
+        if 'total_epochs' in data:
+            update_data['total_epochs'] = data['total_epochs']
+        if 'step_progress' in data:
+            update_data['step_progress'] = data['step_progress']
+        
+        # Update the training job progress
+        db.update_training_job(job_id, update_data)
+        
+        # Log the detailed progress
+        step_info = ""
+        if 'current_step' in data and 'total_steps' in data:
+            step_info = f" (Step {data['current_step']}/{data['total_steps']})"
+        
+        # Emit real-time progress update via SocketIO
+        socketio.emit('training_progress', {
+            'job_id': job_id,
+            'progress': progress,
+            'current_step': data.get('current_step'),
+            'total_steps': data.get('total_steps'),
+            'epoch': data.get('epoch'),
+            'total_epochs': data.get('total_epochs'),
+            'step_progress': data.get('step_progress'),
+            'message': f'Progress: {progress*100:.1f}%{step_info}'
+        })
+        
+        return jsonify({
+            'success': True,
+            'message': f'Updated progress for job {job_id} to {progress*100:.1f}%{step_info}',
+            'progress': progress,
+            'details': data
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 @app.route('/api/detect-stuck-training', methods=['POST'])
 def detect_stuck_training():
     """Detect and fix stuck training jobs"""
@@ -947,5 +1071,6 @@ if __name__ == '__main__':
     print("  DELETE /api/training-jobs/<id> - Delete training job")
     print("  POST /api/start-training - Start training")
     print("  GET  /api/health - Health check")
+    print("  SocketIO: training_progress - Real-time training updates")
     
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    socketio.run(app, host='0.0.0.0', port=5000, debug=True)

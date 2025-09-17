@@ -353,19 +353,32 @@ PARAMETER top_p 0.9
             train_samples = []
             val_samples = []
             
+            valid_datasets = []
             for dataset_id in dataset_ids:
                 # Get dataset by database ID, not Hugging Face ID
+                # Convert string ID to int for comparison
+                dataset_id_int = int(dataset_id)
                 all_datasets = db.get_all_datasets()
                 dataset = None
                 for ds in all_datasets:
-                    if ds['id'] == dataset_id:
+                    if ds['id'] == dataset_id_int:
                         dataset = ds
                         break
                 
                 if dataset:
                     samples = self._convert_dataset_to_lora_format(dataset)
-                    train_samples.extend(samples[:-len(samples)//5])  # 80% for training
-                    val_samples.extend(samples[-len(samples)//5:])    # 20% for validation
+                    if samples:  # Only include datasets with actual samples
+                        train_samples.extend(samples[:-len(samples)//5])  # 80% for training
+                        val_samples.extend(samples[-len(samples)//5:])    # 20% for validation
+                        valid_datasets.append(dataset['name'])
+                        print(f"✅ Added {len(samples)} samples from: {dataset['name']}")
+                    else:
+                        print(f"⚠️ Skipping empty dataset: {dataset['name']}")
+            
+            if not train_samples:
+                raise Exception(f"No training samples found. Valid datasets: {valid_datasets}")
+            
+            print(f"📊 Total samples: {len(train_samples)} training, {len(val_samples)} validation from {len(valid_datasets)} datasets")
             
             # Save training data
             self._save_jsonl(train_samples, os.path.join(train_dir, 'train.jsonl'))
@@ -383,13 +396,28 @@ PARAMETER top_p 0.9
         samples_preview = metadata.get('samples_preview', [])
         
         for sample in samples_preview:
+            # Handle different dataset formats
             lora_sample = {
-                "instruction": sample.get('instruction', ''),
-                "input": sample.get('input', ''),
-                "output": sample.get('output', ''),
+                "instruction": sample.get('instruction', sample.get('Instruction', '')),
+                "input": sample.get('input', sample.get('Input', '')),
+                "output": sample.get('output', sample.get('Response', '')),
                 "system": sample.get('system', '')
             }
-            samples.append(lora_sample)
+            
+            # Handle datasets where data is stored as Python dict string in 'content' field
+            if 'content' in sample and not lora_sample['instruction']:
+                try:
+                    import ast
+                    content_data = ast.literal_eval(sample['content'])
+                    lora_sample['instruction'] = content_data.get('Instruction', content_data.get('instruction', ''))
+                    lora_sample['output'] = content_data.get('Response', content_data.get('output', ''))
+                    lora_sample['input'] = content_data.get('Input', content_data.get('input', ''))
+                except:
+                    pass  # Skip if parsing fails
+            
+            # Skip samples with no instruction or output
+            if lora_sample['instruction'] or lora_sample['output']:
+                samples.append(lora_sample)
         
         return samples
     
@@ -446,6 +474,9 @@ PARAMETER top_p 0.9
         batch_size = params.get('batchSize', 4)
         epochs = params.get('epochs', 3)
         
+        # Map Ollama model names to Hugging Face model IDs
+        hf_model_id = self._map_ollama_to_hf(base_model)
+        
         script = f'''#!/usr/bin/env python3
 """
 LoRA Training Script for {job_name}
@@ -475,7 +506,7 @@ def main():
         logger.info("🚀 Starting LoRA training for {job_name}")
         
         # Model and data paths
-        base_model = "{base_model}"
+        base_model = "{hf_model_id}"
         train_data_path = "training_data/job_{job_id}/train.jsonl"
         val_data_path = "training_data/job_{job_id}/val.jsonl"
         output_dir = f"models/{job_name}_lora"
@@ -591,9 +622,44 @@ def main():
             tokenizer=tokenizer,
         )
         
-        # Start training
+        # Start training with progress tracking
         logger.info("🏃 Starting training...")
-        trainer.train()
+        
+        # Custom training loop with progress updates
+        total_steps = trainer.get_train_dataloader().__len__() * {epochs}
+        current_step = 0
+        
+        for epoch in range({epochs}):
+            logger.info(f"📚 Starting epoch {{epoch + 1}}/{epochs}")
+            epoch_steps = 0
+            
+            for step, batch in enumerate(trainer.get_train_dataloader()):
+                # Training step
+                trainer.training_step(trainer.model, batch)
+                current_step += 1
+                epoch_steps += 1
+                
+                # Update progress every 5 steps for more frequent updates
+                if current_step % 5 == 0:
+                    progress = 0.2 + (current_step / total_steps) * 0.6  # 20% to 80%
+                    logger.info(f"📊 Progress: {{progress*100:.1f}}% (Step {{current_step}}/{{total_steps}})")
+                    
+                    # Update database progress with detailed info
+                    import requests
+                    try:
+                        requests.post(f'http://localhost:5000/api/training-jobs/{job_id}/progress', 
+                                    json={{
+                                        'progress': progress,
+                                        'current_step': current_step,
+                                        'total_steps': total_steps,
+                                        'epoch': epoch + 1,
+                                        'total_epochs': {epochs},
+                                        'step_progress': f"{{current_step}}/{{total_steps}}"
+                                    }}, timeout=1)
+                    except:
+                        pass  # Don't fail training if progress update fails
+            
+            logger.info(f"✅ Completed epoch {{epoch + 1}}/{epochs}")
         
         # Save model
         logger.info("💾 Saving trained model...")
@@ -611,6 +677,35 @@ if __name__ == "__main__":
 '''
         
         return script
+    
+    def _map_ollama_to_hf(self, ollama_model: str) -> str:
+        """Map Ollama model names to Hugging Face model IDs"""
+        mapping = {
+            # Non-gated models (no authentication required)
+            'qwen2.5-coder:7b': 'Qwen/Qwen2.5-Coder-7B',
+            'qwen2.5:7b': 'Qwen/Qwen2.5-7B',
+            'qwen2.5:14b': 'Qwen/Qwen2.5-14B',
+            'mistral:7b': 'mistralai/Mistral-7B-v0.1',
+            'gemma2:9b': 'google/gemma-2-9b',
+            'gemma2:27b': 'google/gemma-2-27b',
+            'llava:13b': 'llava-hf/llava-1.5-13b-hf',
+            
+            # Gated models (require Hugging Face authentication)
+            'llama3.1:8b': 'meta-llama/Meta-Llama-3.1-8B',
+            'llama3.1:70b': 'meta-llama/Meta-Llama-3.1-70B',
+            'codellama:13b': 'codellama/CodeLlama-13b-Python-hf',
+            'codellama:7b': 'codellama/CodeLlama-7b-Python-hf'
+        }
+        
+        # Remove :latest suffix if present
+        clean_name = ollama_model.replace(':latest', '')
+        
+        if clean_name in mapping:
+            return mapping[clean_name]
+        else:
+            # Default fallback - try to use the name as-is
+            print(f"⚠️ Unknown Ollama model: {ollama_model}, using as Hugging Face ID")
+            return clean_name
     
     def _create_ollama_model_from_lora(self, model_name: str, base_model: str):
         """Create Ollama model from trained LoRA weights"""

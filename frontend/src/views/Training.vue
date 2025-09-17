@@ -158,7 +158,12 @@
               <div class="progress-bar" :style="{ width: job.progress + '%' }"></div>
             </div>
             <div class="job-meta">
-              <span>Epoch {{ job.currentEpoch }}/{{ job.totalEpochs }}</span>
+              <span v-if="job.currentStep && job.totalSteps">
+                Step {{ job.currentStep }}/{{ job.totalSteps }}
+              </span>
+              <span v-else-if="job.currentEpoch && job.totalEpochs">
+                Epoch {{ job.currentEpoch }}/{{ job.totalEpochs }}
+              </span>
               <span>{{ formatDuration(job.elapsedTime) }}</span>
             </div>
             <div class="job-metrics" v-if="job.metrics">
@@ -486,6 +491,7 @@
 
 <script>
 import Icon from '../components/Icon.vue';
+import { io } from 'socket.io-client';
 export default {
   name: 'TrainingView',
   components: {
@@ -530,12 +536,67 @@ export default {
       chromadbCollections: 0
     };
   },
-  async mounted() {
+  methods: {
+    initializeSocket() {
+      // Connect to Socket.IO server
+      this.socket = io('http://localhost:5000');
+      
+      // Listen for real-time training progress updates
+      this.socket.on('training_progress', (data) => {
+        console.log('📊 Real-time training progress:', data);
+        this.updateTrainingProgress(data);
+      });
+      
+      this.socket.on('connect', () => {
+        console.log('🔌 Connected to Socket.IO server');
+      });
+      
+      this.socket.on('disconnect', () => {
+        console.log('🔌 Disconnected from Socket.IO server');
+      });
+    },
+    
+    updateTrainingProgress(data) {
+      // Find the training job and update its progress
+      const jobIndex = this.trainingJobs.findIndex(job => job.id === data.job_id);
+      if (jobIndex !== -1) {
+        // Update progress with real-time data
+        this.trainingJobs[jobIndex].progress = data.progress;
+        
+        // Update step information if available
+        if (data.current_step && data.total_steps) {
+          this.trainingJobs[jobIndex].currentStep = data.current_step;
+          this.trainingJobs[jobIndex].totalSteps = data.total_steps;
+          this.trainingJobs[jobIndex].stepProgress = data.step_progress;
+        }
+        
+        // Update epoch information if available
+        if (data.epoch && data.total_epochs) {
+          this.trainingJobs[jobIndex].currentEpoch = data.epoch;
+          this.trainingJobs[jobIndex].totalEpochs = data.total_epochs;
+        }
+        
+        console.log(`📈 Updated job ${data.job_id}: ${data.message}`);
+      }
+    }
+    },
+    
+    beforeUnmount() {
+      // Clean up Socket.IO connection
+      if (this.socket) {
+        this.socket.disconnect();
+      }
+    },
+    
+    async mounted() {
     // Load available datasets, training jobs, and Ollama models when component mounts
     await this.fetchAvailableDatasets();
     await this.fetchTrainingJobs();
     await this.fetchOllamaModels();
     await this.fetchChromaDBCollections();
+    
+    // Initialize Socket.IO connection for real-time updates
+    this.initializeSocket();
   },
   computed: {
     canStartTraining() {
@@ -1065,9 +1126,61 @@ export default {
       // Legacy method - redirect to new stopTraining
       this.stopTraining(jobId);
     },
-    deleteJob(jobId) {
-      if (confirm('Delete this training job?')) {
-        this.trainingJobs = this.trainingJobs.filter(job => job.id !== jobId);
+    async deleteJob(jobId) {
+      // Find the job to get its details for confirmation
+      const job = this.trainingJobs.find(j => j.id === jobId);
+      if (!job) return;
+      
+      // Show confirmation modal with job details
+      const confirmed = confirm(
+        `Are you sure you want to delete this training job?\n\n` +
+        `Job: ${job.jobName}\n` +
+        `Type: ${job.type}\n` +
+        `Status: ${job.status}\n` +
+        `Model: ${job.modelName}\n\n` +
+        `This action cannot be undone and will also delete:\n` +
+        `- The training job record\n` +
+        `- Associated ChromaDB collection (if RAG)\n` +
+        `- Generated model files (if completed)`
+      );
+      
+      if (!confirmed) return;
+      
+      try {
+        // Delete from backend
+        const response = await fetch(`http://localhost:5000/api/training-jobs/${jobId}`, {
+          method: 'DELETE'
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+          // Remove from frontend array
+          this.trainingJobs = this.trainingJobs.filter(j => j.id !== jobId);
+          
+          // Show success message with cleanup details
+          console.log(`✅ Successfully deleted training job: ${job.jobName}`);
+          console.log('🧹 Cleanup results:', result.cleanup_results);
+          
+          // Show cleanup results to user
+          const cleanupMessage = result.cleanup_results && result.cleanup_results.length > 0 
+            ? `\n\nCleanup completed:\n${result.cleanup_results.join('\n')}`
+            : '';
+          
+          alert(`✅ Training job "${job.jobName}" deleted successfully!${cleanupMessage}`);
+          
+          // Refresh data to ensure consistency
+          await this.fetchTrainingJobs();
+          await this.fetchChromaDBCollections();
+          
+        } else {
+          console.error('Failed to delete training job:', result.error);
+          alert(`Failed to delete training job: ${result.error}`);
+        }
+        
+      } catch (error) {
+        console.error('Error deleting training job:', error);
+        alert(`Error deleting training job: ${error.message}`);
       }
     },
     
