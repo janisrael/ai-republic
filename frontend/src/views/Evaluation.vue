@@ -614,6 +614,7 @@ export default {
   },
   async mounted() {
     await this.fetchDatasets();
+    await this.fetchEvaluations();
     await this.loadRealEvaluations();
     await this.updateMetrics();
   },
@@ -666,11 +667,6 @@ export default {
     canStartEvaluation() {
       return this.newEvaluation.modelId && this.newEvaluation.datasetId && this.newEvaluation.name;
     }
-  },
-  mounted() {
-    // Load real data from API
-    this.fetchEvaluations();
-    this.fetchDatasets();
   },
   methods: {
     async fetchEvaluations() {
