@@ -8,6 +8,7 @@ import json
 import os
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
+from flask_socketio import SocketIO, emit
 import subprocess
 import sys
 from dataset_loader import load_any_dataset
@@ -19,6 +20,7 @@ from datetime import datetime
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend
+socketio = SocketIO(app, cors_allowed_origins="*")  # Enable SocketIO with CORS
 
 # Global variables - removed old datasets_info system
 
@@ -273,20 +275,87 @@ def update_training_job(job_id):
 
 @app.route('/api/training-jobs/<int:job_id>', methods=['DELETE'])
 def delete_training_job(job_id):
-    """Delete a training job"""
+    """Delete a training job and clean up associated resources"""
     try:
+        # Get job details before deletion for cleanup
+        job = db.get_training_job(job_id)
+        if not job:
+            return jsonify({
+                'success': False,
+                'error': 'Job not found'
+            }), 404
+        
+        # Clean up associated resources
+        cleanup_results = []
+        
+        # 1. Delete ChromaDB collection if it's a RAG training job
+        if job.get('training_type') == 'rag':
+            try:
+                collection_name = f"knowledge_base_job_{job_id}"
+                chromadb_deleted = chromadb_service.delete_collection(collection_name)
+                cleanup_results.append(f"ChromaDB collection '{collection_name}': {'deleted' if chromadb_deleted else 'not found'}")
+            except Exception as e:
+                cleanup_results.append(f"ChromaDB cleanup error: {str(e)}")
+        
+        # 2. Delete model files if job was completed
+        if job.get('status') == 'COMPLETED' and job.get('model_name'):
+            try:
+                import os
+                import shutil
+                model_name = job.get('model_name', '').replace(':', '_').replace('/', '_')
+                model_dir = f"models/{model_name}"
+                
+                if os.path.exists(model_dir):
+                    shutil.rmtree(model_dir)
+                    cleanup_results.append(f"Model directory '{model_dir}': deleted")
+                else:
+                    cleanup_results.append(f"Model directory '{model_dir}': not found")
+                    
+                # Also try to remove from Ollama if possible
+                try:
+                    import subprocess
+                    ollama_model_name = job.get('model_name')
+                    if ollama_model_name:
+                        result = subprocess.run(['ollama', 'rm', ollama_model_name], 
+                                              capture_output=True, text=True, timeout=10)
+                        if result.returncode == 0:
+                            cleanup_results.append(f"Ollama model '{ollama_model_name}': removed")
+                        else:
+                            cleanup_results.append(f"Ollama model '{ollama_model_name}': not found or error")
+                except Exception as e:
+                    cleanup_results.append(f"Ollama cleanup error: {str(e)}")
+                    
+            except Exception as e:
+                cleanup_results.append(f"Model file cleanup error: {str(e)}")
+        
+        # 3. Delete training data directory
+        try:
+            import os
+            import shutil
+            train_data_dir = f"training_data/job_{job_id}"
+            if os.path.exists(train_data_dir):
+                shutil.rmtree(train_data_dir)
+                cleanup_results.append(f"Training data directory '{train_data_dir}': deleted")
+            else:
+                cleanup_results.append(f"Training data directory '{train_data_dir}': not found")
+        except Exception as e:
+            cleanup_results.append(f"Training data cleanup error: {str(e)}")
+        
+        # 4. Delete from database
         success = db.delete_training_job(job_id)
         
         if success:
             return jsonify({
                 'success': True,
-                'message': 'Training job deleted successfully'
+                'message': 'Training job deleted successfully',
+                'cleanup_results': cleanup_results,
+                'job_name': job.get('name', 'Unknown')
             })
         else:
             return jsonify({
                 'success': False,
-                'error': 'Job not found'
-            }), 404
+                'error': 'Failed to delete job from database'
+            }), 500
             
     except Exception as e:
         return jsonify({
@@ -605,6 +674,155 @@ def get_ollama_models():
             'error': str(e)
         }), 500
 
+@app.route('/api/models/<model_name>/details', methods=['GET'])
+def get_model_details(model_name):
+    """Get detailed information about a specific model"""
+    try:
+        # Get model details using ollama show
+        result = subprocess.run(['ollama', 'show', model_name], capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return jsonify({
+                'success': False,
+                'error': f'Failed to get details for model: {model_name}'
+            }), 404
+        
+        # Parse the output
+        details = parse_model_details(result.stdout)
+        
+        return jsonify({
+            'success': True,
+            'model_name': model_name,
+            'details': details
+        })
+        
+    except subprocess.TimeoutExpired:
+        return jsonify({
+            'success': False,
+            'error': 'Timeout getting model details'
+        }), 408
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+def parse_model_details(output):
+    """Parse ollama show output into structured data"""
+    details = {
+        'architecture': None,
+        'parameters': None,
+        'context_length': None,
+        'embedding_length': None,
+        'quantization': None,
+        'capabilities': [],
+        'parameters_config': {},
+        'license': None,
+        'tokens': None,  # Will be calculated/estimated
+        'training_data_size': None,
+        'vocab_size': None
+    }
+    
+    lines = output.split('\n')
+    current_section = None
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+            
+        # Detect sections
+        if line == 'Model':
+            current_section = 'model'
+            continue
+        elif line == 'Capabilities':
+            current_section = 'capabilities'
+            continue
+        elif line == 'Parameters':
+            current_section = 'parameters'
+            continue
+        elif line == 'License':
+            current_section = 'license'
+            continue
+        
+        # Parse content based on current section
+        if current_section == 'model' and line.strip() and not line.startswith(' '):
+            # Handle format: "architecture        llama" or "context length      131072"
+            parts = line.split()
+            if len(parts) >= 2:
+                # Handle multi-word keys like "context length"
+                if len(parts) >= 3 and parts[1] == 'length':
+                    key = f"{parts[0]}_{parts[1]}".lower()
+                    value = parts[2]
+                else:
+                    key = parts[0].lower().replace(' ', '_')
+                    value = ' '.join(parts[1:]).strip()
+                
+                if key == 'architecture':
+                    details['architecture'] = value
+                elif key == 'parameters':
+                    details['parameters'] = value
+                elif key == 'context_length':
+                    details['context_length'] = int(value)
+                elif key == 'embedding_length':
+                    details['embedding_length'] = int(value)
+                elif key == 'quantization':
+                    details['quantization'] = value
+                
+        elif current_section == 'capabilities':
+            if line and not line.startswith(' ') and line.strip():
+                details['capabilities'].append(line.strip())
+                
+        elif current_section == 'parameters' and ':' in line:
+            key, value = line.split(':', 1)
+            details['parameters_config'][key.strip()] = value.strip()
+            
+        elif current_section == 'license':
+            if not details['license']:
+                details['license'] = line
+            else:
+                details['license'] += ' ' + line
+    
+    # Estimate tokens and other metrics based on parameters
+    if details['parameters']:
+        try:
+            param_str = details['parameters'].replace('B', '').replace('M', '')
+            if 'B' in details['parameters']:
+                params = float(param_str) * 1_000_000_000
+            elif 'M' in details['parameters']:
+                params = float(param_str) * 1_000_000
+            else:
+                params = float(param_str)
+            
+            # Rough estimations based on model size
+            # Training tokens: typically 1-2 tokens per parameter
+            estimated_tokens = int(params * 1.5)  # Conservative estimate
+            details['tokens'] = f"{estimated_tokens:,}"
+            
+            # Training data size estimation
+            if params > 10_000_000_000:  # >10B params
+                details['training_data_size'] = "~2-3 trillion tokens"
+            elif params > 1_000_000_000:  # >1B params
+                details['training_data_size'] = "~200-500 billion tokens"
+            elif params > 100_000_000:  # >100M params
+                details['training_data_size'] = "~20-50 billion tokens"
+            else:
+                details['training_data_size'] = "~2-5 billion tokens"
+            
+            # Vocabulary size estimation
+            if 'llama' in details.get('architecture', '').lower():
+                details['vocab_size'] = "128,256"
+            elif 'gemma' in details.get('architecture', '').lower():
+                details['vocab_size'] = "256,000"
+            else:
+                details['vocab_size'] = "~50,000-256,000"
+                
+        except:
+            details['tokens'] = 'Unknown'
+            details['training_data_size'] = 'Unknown'
+            details['vocab_size'] = 'Unknown'
+    
+    return details
+
 # ChromaDB API Endpoints
 @app.route('/api/chromadb/collections', methods=['GET'])
 def get_chromadb_collections():
@@ -733,6 +951,112 @@ def health_check():
             'chromadb': 'disconnected'
         }), 500
 
+@app.route('/api/training-jobs/<int:job_id>/progress', methods=['POST'])
+def update_training_progress(job_id):
+    """Update training progress for a specific job with detailed step information"""
+    try:
+        data = request.get_json()
+        progress = data.get('progress', 0.0)
+        
+        # Prepare update data with detailed progress info
+        update_data = {'progress': progress}
+        
+        # Add detailed progress information if available
+        if 'current_step' in data:
+            update_data['current_step'] = data['current_step']
+        if 'total_steps' in data:
+            update_data['total_steps'] = data['total_steps']
+        if 'epoch' in data:
+            update_data['current_epoch'] = data['epoch']
+        if 'total_epochs' in data:
+            update_data['total_epochs'] = data['total_epochs']
+        if 'step_progress' in data:
+            update_data['step_progress'] = data['step_progress']
+        
+        # Update the training job progress
+        db.update_training_job(job_id, update_data)
+        
+        # Log the detailed progress
+        step_info = ""
+        if 'current_step' in data and 'total_steps' in data:
+            step_info = f" (Step {data['current_step']}/{data['total_steps']})"
+        
+        # Emit real-time progress update via SocketIO
+        socketio.emit('training_progress', {
+            'job_id': job_id,
+            'progress': progress,
+            'current_step': data.get('current_step'),
+            'total_steps': data.get('total_steps'),
+            'epoch': data.get('epoch'),
+            'total_epochs': data.get('total_epochs'),
+            'step_progress': data.get('step_progress'),
+            'message': f'Progress: {progress*100:.1f}%{step_info}'
+        })
+        
+        return jsonify({
+            'success': True,
+            'message': f'Updated progress for job {job_id} to {progress*100:.1f}%{step_info}',
+            'progress': progress,
+            'details': data
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/detect-stuck-training', methods=['POST'])
+def detect_stuck_training():
+    """Detect and fix stuck training jobs"""
+    try:
+        import time
+        from datetime import datetime, timedelta
+        
+        # Get all running training jobs
+        jobs = db.get_training_jobs()
+        stuck_jobs = []
+        
+        for job in jobs:
+            if job['status'] == 'RUNNING':
+                started_at = job.get('started_at')
+                if started_at:
+                    start_time = datetime.fromisoformat(started_at)
+                    elapsed = datetime.now() - start_time
+                    
+                    # Check if job has been running too long
+                    timeout_minutes = 30 if job['training_type'] == 'LoRA' else 10
+                    
+                    if elapsed > timedelta(minutes=timeout_minutes):
+                        # Check if progress hasn't changed in last 5 minutes
+                        if job['progress'] < 0.5:  # Less than 50% progress
+                            stuck_jobs.append({
+                                'job_id': job['id'],
+                                'job_name': job['name'],
+                                'elapsed_minutes': int(elapsed.total_seconds() / 60),
+                                'progress': job['progress']
+                            })
+        
+        # Mark stuck jobs as failed
+        for stuck_job in stuck_jobs:
+            db.update_training_job(stuck_job['job_id'], {
+                'status': 'FAILED',
+                'error_message': f'Training stuck for {stuck_job["elapsed_minutes"]} minutes with {stuck_job["progress"]*100:.1f}% progress'
+            })
+        
+        return jsonify({
+            'success': True,
+            'stuck_jobs_found': len(stuck_jobs),
+            'stuck_jobs': stuck_jobs,
+            'message': f'Found and fixed {len(stuck_jobs)} stuck training jobs'
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 if __name__ == '__main__':
     print("🚀 Starting AI Refinement Dashboard API Server...")
     print("📊 Database initialized...")
@@ -747,5 +1071,6 @@ if __name__ == '__main__':
     print("  DELETE /api/training-jobs/<id> - Delete training job")
     print("  POST /api/start-training - Start training")
     print("  GET  /api/health - Health check")
+    print("  SocketIO: training_progress - Real-time training updates")
     
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    socketio.run(app, host='0.0.0.0', port=5000, debug=True)

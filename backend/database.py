@@ -285,6 +285,10 @@ class Database:
             
             return None
     
+    def get_training_job(self, job_id: int) -> Optional[Dict[str, Any]]:
+        """Get a training job by ID (alias for get_training_job_by_id)"""
+        return self.get_training_job_by_id(job_id)
+    
     def update_training_job(self, job_id: int, updates: Dict[str, Any]) -> bool:
         """Update a training job"""
         with sqlite3.connect(self.db_path) as conn:

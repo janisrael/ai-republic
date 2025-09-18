@@ -604,21 +604,6 @@ export default {
     await this.loadRealEvaluations();
     await this.updateMetrics();
   },
-  
-  beforeUnmount() {
-    // Cleanup chart tooltips to prevent memory leaks
-    if (this.fitnessChartCleanup) {
-      this.fitnessChartCleanup();
-    }
-  },
-  watch: {
-    evaluations: {
-      handler() {
-        this.updateMetrics();
-      },
-      deep: true
-    }
-  },
   computed: {
     filteredEvaluations() {
       return this.evaluations.filter(evaluation => 
@@ -700,8 +685,8 @@ export default {
               // Create placeholder evaluation for training job without evaluation
               return {
                 id: `job-${job.id}`,
-                modelId: job.model_name ? job.model_name.replace(':', '-') : `job-${job.id}`,
-                modelName: job.model_name || `Job ${job.id}`,
+                modelId: job.model_name.replace(':', '-'),
+                modelName: job.model_name,
                 modelType: this.getModelType(job.model_name),
                 datasetId: job.dataset_id ? job.dataset_id.toString() : '1',
                 datasetName: this.getDatasetName(job.dataset_id || 1),
@@ -744,7 +729,6 @@ export default {
     },
     
     getModelType(modelName) {
-      if (!modelName) return 'Unknown';
       if (modelName.includes('rag')) return 'RAG System';
       if (modelName.includes('debugger')) return 'Code Debugging';
       if (modelName.includes('coder')) return 'Code Generation';
@@ -763,13 +747,11 @@ export default {
     },
     
     getTrainingType(modelName) {
-      if (!modelName) return 'Unknown Training';
       if (modelName.includes('rag')) return 'RAG Training';
       return 'LoRA Fine-tuning';
     },
     
     getBaseModel(modelName) {
-      if (!modelName) return 'Unknown Base Model';
       if (modelName.includes('llama')) return 'llama3.1:8b';
       if (modelName.includes('coder')) return 'codellama:13b';
       return 'claude-3.7-sonnet-reasoning-gemma3-12B';
@@ -857,11 +839,6 @@ export default {
                 }
               };
             });
-          
-          console.log(`📊 Loaded ${this.evaluations.length} real evaluations from training jobs`);
-          
-          // Update metrics after loading evaluations
-          await this.updateMetrics();
         }
       } catch (error) {
         console.error('Error loading real evaluations:', error);
@@ -870,41 +847,10 @@ export default {
     
     async updateMetrics() {
       if (this.evaluations.length > 0) {
-        // Calculate average accuracy
         const avgAccuracy = this.evaluations.reduce((sum, evaluation) => sum + evaluation.metrics.accuracy, 0) / this.evaluations.length;
         this.metrics.accuracy.value = `${avgAccuracy.toFixed(1)}%`;
-        
-        // Calculate accuracy trend (compare recent vs older evaluations)
-        const sortedEvaluations = this.evaluations.sort((a, b) => new Date(a.date) - new Date(b.date));
-        const recentCount = Math.min(3, Math.floor(sortedEvaluations.length / 2));
-        const olderCount = Math.min(3, sortedEvaluations.length - recentCount);
-        
-        if (recentCount > 0 && olderCount > 0) {
-          const recentAvg = sortedEvaluations.slice(-recentCount).reduce((sum, evaluation) => sum + evaluation.metrics.accuracy, 0) / recentCount;
-          const olderAvg = sortedEvaluations.slice(0, olderCount).reduce((sum, evaluation) => sum + evaluation.metrics.accuracy, 0) / olderCount;
-          this.metrics.accuracy.trend = olderAvg > 0 ? ((recentAvg - olderAvg) / olderAvg) * 100 : 0;
-        } else {
-          this.metrics.accuracy.trend = Math.random() * 20 - 5; // Random trend if not enough data
-        }
-        
-        // Update models count
         this.metrics.models.value = this.evaluations.length.toString();
-        this.metrics.models.trend = this.evaluations.length > 0 ? Math.random() * 10 + 5 : 0; // Positive trend for models
-        
-        // Update datasets count
-        const uniqueDatasets = new Set(this.evaluations.map(evaluation => evaluation.datasetId)).size;
-        this.metrics.datasets.value = uniqueDatasets.toString();
-        this.metrics.datasets.trend = uniqueDatasets > 0 ? Math.random() * 15 + 5 : 0; // Positive trend for datasets
-        
-        console.log('📊 Updated evaluation metrics:', this.metrics);
-      } else {
-        // No evaluations yet - show default values
-        this.metrics.accuracy.value = '0%';
-        this.metrics.accuracy.trend = 0;
-        this.metrics.models.value = '0';
-        this.metrics.models.trend = 0;
-        this.metrics.datasets.value = '0';
-        this.metrics.datasets.trend = 0;
+        this.metrics.datasets.value = new Set(this.evaluations.map(evaluation => evaluation.datasetId)).size.toString();
       }
     },
     
@@ -1084,281 +1030,55 @@ export default {
       const ctx = canvas.getContext('2d');
       const data = this.generateFitnessData();
       
-      // Clear canvas
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       
-      // Chart dimensions and padding
-      const padding = { top: 40, right: 60, bottom: 60, left: 80 };
-      const chartWidth = canvas.width - padding.left - padding.right;
-      const chartHeight = canvas.height - padding.top - padding.bottom;
+      // Draw overfitting zone
+      ctx.fillStyle = 'rgba(231, 74, 59, 0.1)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
       
-      // Draw background grid
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
-      ctx.lineWidth = 1;
-      
-      // Vertical grid lines (epochs)
-      for (let i = 0; i <= 10; i++) {
-        const x = padding.left + (i / 10) * chartWidth;
-        ctx.beginPath();
-        ctx.moveTo(x, padding.top);
-        ctx.lineTo(x, padding.top + chartHeight);
-        ctx.stroke();
-      }
-      
-      // Horizontal grid lines (accuracy)
-      for (let i = 0; i <= 10; i++) {
-        const y = padding.top + (i / 10) * chartHeight;
-        ctx.beginPath();
-        ctx.moveTo(padding.left, y);
-        ctx.lineTo(padding.left + chartWidth, y);
-        ctx.stroke();
-      }
-      
-      // Draw overfitting zone (red background)
-      ctx.fillStyle = 'rgba(231, 74, 59, 0.05)';
-      ctx.fillRect(padding.left, padding.top, chartWidth, chartHeight);
-      
-      // Draw axes
-      ctx.strokeStyle = '#333';
-      ctx.lineWidth = 2;
-      
-      // X-axis
-      ctx.beginPath();
-      ctx.moveTo(padding.left, padding.top + chartHeight);
-      ctx.lineTo(padding.left + chartWidth, padding.top + chartHeight);
-      ctx.stroke();
-      
-      // Y-axis
-      ctx.beginPath();
-      ctx.moveTo(padding.left, padding.top);
-      ctx.lineTo(padding.left, padding.top + chartHeight);
-      ctx.stroke();
-      
-      // Draw axis labels and numbers
-      ctx.fillStyle = '#333';
-      ctx.font = '12px Arial';
-      ctx.textAlign = 'center';
-      
-      // X-axis labels (Epochs)
-      ctx.fillText('Epochs', canvas.width / 2, canvas.height - 10);
-      for (let i = 0; i <= 10; i++) {
-        const x = padding.left + (i / 10) * chartWidth;
-        const epoch = Math.round((i / 10) * (data.training.length - 1));
-        ctx.fillText(epoch.toString(), x, padding.top + chartHeight + 20);
-      }
-      
-      // Y-axis labels (Accuracy %)
-      ctx.textAlign = 'right';
-      ctx.fillText('Accuracy (%)', 20, padding.top - 10);
-      for (let i = 0; i <= 10; i++) {
-        const y = padding.top + (i / 10) * chartHeight;
-        const accuracy = 100 - (i / 10) * 100;
-        ctx.fillText(accuracy.toString(), padding.left - 10, y + 4);
-      }
-      
-      // Draw trend lines first (behind points)
-      ctx.lineWidth = 3;
-      
-      // Training line
-      ctx.strokeStyle = '#4e73df';
-      ctx.setLineDash([]);
-      ctx.beginPath();
-      data.training.forEach((point, index) => {
-        const x = padding.left + (index / (data.training.length - 1)) * chartWidth;
-        const y = padding.top + chartHeight - (point / 100) * chartHeight;
-        if (index === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      });
-      ctx.stroke();
-      
-      // Validation line
-      ctx.strokeStyle = '#1cc88a';
-      ctx.setLineDash([8, 4]);
-      ctx.beginPath();
-      data.validation.forEach((point, index) => {
-        const x = padding.left + (index / (data.validation.length - 1)) * chartWidth;
-        const y = padding.top + chartHeight - (point / 100) * chartHeight;
-        if (index === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      });
-      ctx.stroke();
-      ctx.setLineDash([]);
-      
-      // Draw data points with hover detection
-      this.fitnessChartData = data; // Store for tooltip
-      
-      // Training points
+      // Draw training data points
       ctx.fillStyle = '#4e73df';
       data.training.forEach((point, index) => {
-        const x = padding.left + (index / (data.training.length - 1)) * chartWidth;
-        const y = padding.top + chartHeight - (point / 100) * chartHeight;
-        
+        const x = (index / (data.training.length - 1)) * (canvas.width - 40) + 20;
+        const y = canvas.height - 20 - (point / 100) * (canvas.height - 40);
         ctx.beginPath();
         ctx.arc(x, y, 6, 0, 2 * Math.PI);
         ctx.fill();
-        
-        // White border for better visibility
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 2;
-        ctx.stroke();
       });
       
-      // Validation points
+      // Draw validation data points
       ctx.fillStyle = '#1cc88a';
       data.validation.forEach((point, index) => {
-        const x = padding.left + (index / (data.validation.length - 1)) * chartWidth;
-        const y = padding.top + chartHeight - (point / 100) * chartHeight;
-        
+        const x = (index / (data.validation.length - 1)) * (canvas.width - 40) + 20;
+        const y = canvas.height - 20 - (point / 100) * (canvas.height - 40);
         ctx.beginPath();
         ctx.arc(x, y, 6, 0, 2 * Math.PI);
         ctx.fill();
-        
-        // White border for better visibility
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 2;
-        ctx.stroke();
       });
       
-      // Add chart title
-      ctx.fillStyle = '#333';
-      ctx.font = 'bold 14px Arial';
-      ctx.textAlign = 'center';
-      ctx.fillText('Training vs Validation Performance', canvas.width / 2, 25);
+      // Draw trend lines
+      ctx.strokeStyle = '#4e73df';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 5]);
+      ctx.beginPath();
+      data.training.forEach((point, index) => {
+        const x = (index / (data.training.length - 1)) * (canvas.width - 40) + 20;
+        const y = canvas.height - 20 - (point / 100) * (canvas.height - 40);
+        if (index === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
       
-      // Add interactive tooltip
-      this.addFitnessChartTooltip(canvas, data, padding, chartWidth, chartHeight);
-    },
-    
-    addFitnessChartTooltip(canvas, data, padding, chartWidth, chartHeight) {
-      const ctx = canvas.getContext('2d');
-      let tooltipVisible = false;
-      let tooltipData = null;
-      
-      // Create tooltip element
-      const tooltip = document.createElement('div');
-      tooltip.style.cssText = `
-        position: absolute;
-        background: rgba(0, 0, 0, 0.9);
-        color: white;
-        padding: 8px 12px;
-        border-radius: 6px;
-        font-size: 12px;
-        font-family: Arial, sans-serif;
-        pointer-events: none;
-        z-index: 1000;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-        display: none;
-      `;
-      document.body.appendChild(tooltip);
-      
-      // Mouse move handler
-      const handleMouseMove = (event) => {
-        const rect = canvas.getBoundingClientRect();
-        const x = event.clientX - rect.left;
-        const y = event.clientY - rect.top;
-        
-        // Check if mouse is within chart area
-        if (x >= padding.left && x <= padding.left + chartWidth && 
-            y >= padding.top && y <= padding.top + chartHeight) {
-          
-          // Find closest data point
-          let closestPoint = null;
-          let minDistance = Infinity;
-          
-          // Check training points
-          data.training.forEach((point, index) => {
-            const pointX = padding.left + (index / (data.training.length - 1)) * chartWidth;
-            const pointY = padding.top + chartHeight - (point / 100) * chartHeight;
-            const distance = Math.sqrt((x - pointX) ** 2 + (y - pointY) ** 2);
-            
-            if (distance < minDistance && distance < 20) {
-              minDistance = distance;
-              closestPoint = {
-                type: 'Training',
-                epoch: index,
-                accuracy: point.toFixed(1),
-                x: pointX,
-                y: pointY,
-                color: '#4e73df'
-              };
-            }
-          });
-          
-          // Check validation points
-          data.validation.forEach((point, index) => {
-            const pointX = padding.left + (index / (data.validation.length - 1)) * chartWidth;
-            const pointY = padding.top + chartHeight - (point / 100) * chartHeight;
-            const distance = Math.sqrt((x - pointX) ** 2 + (y - pointY) ** 2);
-            
-            if (distance < minDistance && distance < 20) {
-              minDistance = distance;
-              closestPoint = {
-                type: 'Validation',
-                epoch: index,
-                accuracy: point.toFixed(1),
-                x: pointX,
-                y: pointY,
-                color: '#1cc88a'
-              };
-            }
-          });
-          
-          if (closestPoint) {
-            tooltipVisible = true;
-            tooltipData = closestPoint;
-            
-            // Update tooltip content
-            tooltip.innerHTML = `
-              <div style="font-weight: bold; margin-bottom: 4px;">${closestPoint.type}</div>
-              <div>Epoch: ${closestPoint.epoch}</div>
-              <div>Accuracy: ${closestPoint.accuracy}%</div>
-            `;
-            
-            // Position tooltip
-            tooltip.style.left = (event.clientX + 10) + 'px';
-            tooltip.style.top = (event.clientY - 10) + 'px';
-            tooltip.style.display = 'block';
-            
-            // Highlight the point
-            ctx.save();
-            ctx.fillStyle = closestPoint.color;
-            ctx.beginPath();
-            ctx.arc(closestPoint.x, closestPoint.y, 10, 0, 2 * Math.PI);
-            ctx.fill();
-            ctx.strokeStyle = '#fff';
-            ctx.lineWidth = 3;
-            ctx.stroke();
-            ctx.restore();
-          } else {
-            tooltipVisible = false;
-            tooltip.style.display = 'none';
-          }
-        } else {
-          tooltipVisible = false;
-          tooltip.style.display = 'none';
-        }
-      };
-      
-      // Mouse leave handler
-      const handleMouseLeave = () => {
-        tooltipVisible = false;
-        tooltip.style.display = 'none';
-        // Redraw chart to remove highlight
-        this.createFitnessChart();
-      };
-      
-      // Add event listeners
-      canvas.addEventListener('mousemove', handleMouseMove);
-      canvas.addEventListener('mouseleave', handleMouseLeave);
-      
-      // Store cleanup function
-      this.fitnessChartCleanup = () => {
-        canvas.removeEventListener('mousemove', handleMouseMove);
-        canvas.removeEventListener('mouseleave', handleMouseLeave);
-        if (tooltip.parentNode) {
-          tooltip.parentNode.removeChild(tooltip);
-        }
-      };
+      ctx.strokeStyle = '#1cc88a';
+      ctx.beginPath();
+      data.validation.forEach((point, index) => {
+        const x = (index / (data.validation.length - 1)) * (canvas.width - 40) + 20;
+        const y = canvas.height - 20 - (point / 100) * (canvas.height - 40);
+        if (index === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+      ctx.setLineDash([]);
     },
     
     generateAccuracyData() {

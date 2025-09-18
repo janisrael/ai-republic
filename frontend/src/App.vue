@@ -103,6 +103,17 @@ onMounted(() => {
           <a 
             href="#" 
             class="nav-link"
+            :class="{ 'active': activeRoute === 'model-comparison' }"
+            @click.prevent="navigateTo('ModelComparison')"
+          >
+            <span class="material-icons-round">compare_arrows</span>
+            <span>Compare</span>
+          </a>
+        </li>
+        <li class="nav-item">
+          <a 
+            href="#" 
+            class="nav-link"
             :class="{ 'active': activeRoute === 'training' }"
             @click.prevent="navigateTo('Training')"
           >
@@ -141,7 +152,7 @@ onMounted(() => {
             <span class="material-icons-round">account_circle</span>
           </div>
           <div class="user-details">
-            <h4>John Doe</h4>
+            <h4>Swordfish</h4>
             <p>Administrator</p>
           </div>
           <button class="btn btn-sm btn-outline">
