@@ -597,10 +597,12 @@ export default {
         { id: 'dataset-5', name: 'Customer Support RAG', type: 'Text' },
         { id: 'dataset-6', name: 'Claude Reasoning Examples', type: 'Text' }
       ],
-      evaluations: []
+      evaluations: [],
+      datasets: []
     };
   },
   async mounted() {
+    await this.fetchDatasets();
     await this.loadRealEvaluations();
     await this.updateMetrics();
   },

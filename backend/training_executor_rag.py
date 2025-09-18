@@ -153,10 +153,7 @@ PARAMETER top_p 0.9
 
     def _extract_dataset_samples_for_chromadb(self, dataset: Dict[str, Any]) -> list:
         chromadb_samples = []
-        # Use all_samples if available, otherwise fall back to samples_preview
-        dataset_samples = dataset.get('metadata', {}).get('all_samples', 
-                                                         dataset.get('metadata', {}).get('samples_preview', []))
-        for sample in dataset_samples:
+        for sample in dataset.get('metadata', {}).get('samples_preview', []):
             combined_text = "\n".join(
                 f"{k.capitalize()}: {v}" for k, v in sample.items() if v
             )
@@ -238,23 +235,9 @@ PARAMETER top_p 0.9
 
     def _create_ollama_model_from_lora(self, model_name: str, base_model: str):
         clean_name = re.sub(r'[^a-zA-Z0-9\-_]', '-', model_name.lower())
-        # Check both sanitized and original names for the model path
-        merged_path_sanitized = f"models/{clean_name}_lora_merged"
-        regular_path_sanitized = f"models/{clean_name}_lora"
-        merged_path_original = f"models/{model_name}_lora_merged"
-        regular_path_original = f"models/{model_name}_lora"
-        
-        # Try sanitized paths first, then original paths
-        if os.path.exists(merged_path_sanitized):
-            model_path = merged_path_sanitized
-        elif os.path.exists(regular_path_sanitized):
-            model_path = regular_path_sanitized
-        elif os.path.exists(merged_path_original):
-            model_path = merged_path_original
-        elif os.path.exists(regular_path_original):
-            model_path = regular_path_original
-        else:
-            model_path = merged_path_sanitized  # Default for error message
+        merged_path = f"models/{clean_name}_lora_merged"
+        regular_path = f"models/{clean_name}_lora"
+        model_path = merged_path if os.path.exists(merged_path) else regular_path
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Model path not found: {model_path}")
         modelfile_content = f"""FROM {base_model}

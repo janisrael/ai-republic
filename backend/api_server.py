@@ -13,7 +13,7 @@ import subprocess
 import sys
 from dataset_loader import load_any_dataset
 from database import db
-from training_executor import training_executor
+from training_executor import TrainingExecutor
 from chromadb_service import chromadb_service
 import re
 from datetime import datetime
@@ -21,6 +21,9 @@ from datetime import datetime
 app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend
 socketio = SocketIO(app, cors_allowed_origins="*")  # Enable SocketIO with CORS
+
+# Initialize training executor
+training_executor = TrainingExecutor()
 
 # Global variables - removed old datasets_info system
 
@@ -45,17 +48,32 @@ def get_datasets():
 @app.route('/api/load-dataset', methods=['POST'])
 def load_new_dataset():
     """Load a new dataset from Hugging Face"""
-    data = request.get_json()
-    dataset_id = data.get('dataset_id')
-    
-    if not dataset_id:
-        return jsonify({
-            'success': False,
-            'error': 'No dataset_id provided'
-        }), 400
-    
+    dataset_id = None
     try:
+        data = request.get_json()
+        print(f"Raw request data: {data}")
+        print(f"Data type: {type(data)}")
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'error': 'No JSON data provided'
+            }), 400
+            
+        dataset_id = data.get('dataset_id')
+        print(f"Dataset ID extracted: {dataset_id}")
+        print(f"Dataset ID type: {type(dataset_id)}")
+        print(f"Dataset ID repr: {repr(dataset_id)}")
+        
+        if not dataset_id:
+            return jsonify({
+                'success': False,
+                'error': 'No dataset_id provided'
+            }), 400
+        
         print(f"Loading dataset: {dataset_id}")
+        print(f"Dataset ID type: {type(dataset_id)}")
+        print(f"Dataset ID value: {repr(dataset_id)}")
         
         # Import and use the new dynamic loader
         from dataset_loader import load_any_dataset
@@ -88,7 +106,8 @@ def load_new_dataset():
                 'metadata': {
                     'loaded_at': result['loaded_at'],
                     'split_used': result.get('split_used', 'train'),
-                    'samples_preview': result['samples'][:10]  # Store first 10 samples as preview
+                    'samples_preview': result['samples'][:10],  # Store first 10 samples as preview
+                    'all_samples': result['samples']  # Store all samples for training
                 }
             }
             
@@ -111,6 +130,8 @@ def load_new_dataset():
             
     except Exception as e:
         print(f"Error loading dataset {dataset_id}: {e}")
+        print(f"Exception type: {type(e)}")
+        print(f"Exception args: {e.args}")
         return jsonify({
             'success': False,
             'error': f'Error loading dataset: {str(e)}'
@@ -222,7 +243,7 @@ def create_training_job():
             'maker': data.get('maker', ''),
             'version': data.get('version', ''),
             'base_model': data['baseModel'],
-            'training_type': data.get('type', 'lora'),
+            'training_type': data.get('training_type', data.get('type', 'lora')),
             'status': 'PENDING',
             'progress': 0.0,
             'config': json.dumps(data),
@@ -384,8 +405,17 @@ def start_training():
                 'error': 'Job not found'
             }), 404
         
-        # Start real training
-        success = training_executor.start_training(job_id, job)
+        # Start real training based on training type
+        training_type = data.get('training_type', job.get('training_type', 'lora'))
+        
+        if training_type.lower() == 'rag':
+            # Import and use RAG training executor
+            from rag_training_executor import TrainingExecutor as RAGTrainingExecutor
+            rag_executor = RAGTrainingExecutor()
+            success = rag_executor.start_training(job_id, job)
+        else:
+            # Use default LoRA training executor
+            success = training_executor.start_training(job_id, job)
         
         if success:
             return jsonify({
@@ -674,12 +704,17 @@ def get_ollama_models():
             'error': str(e)
         }), 500
 
-@app.route('/api/models/<model_name>/details', methods=['GET'])
+@app.route('/api/models/<path:model_name>/details', methods=['GET'])
 def get_model_details(model_name):
     """Get detailed information about a specific model"""
     try:
+        print(f"🔍 DEBUG: Getting details for model: '{model_name}'")
         # Get model details using ollama show
         result = subprocess.run(['ollama', 'show', model_name], capture_output=True, text=True, timeout=10)
+        print(f"🔍 DEBUG: Ollama command result: returncode={result.returncode}")
+        print(f"🔍 DEBUG: Ollama stdout: {result.stdout[:200]}...")
+        if result.stderr:
+            print(f"🔍 DEBUG: Ollama stderr: {result.stderr}")
         if result.returncode != 0:
             return jsonify({
                 'success': False,
@@ -1006,6 +1041,29 @@ def update_training_progress(job_id):
             'error': str(e)
         }), 500
 
+@app.route('/api/training-jobs/<int:job_id>/output', methods=['POST'])
+def update_training_output(job_id):
+    """Update training job with real-time output"""
+    try:
+        data = request.get_json()
+        output = data.get('output', '')
+        timestamp = data.get('timestamp', '')
+        
+        # Emit real-time output to frontend via Socket.IO
+        socketio.emit('training_output', {
+            'job_id': job_id,
+            'output': output,
+            'timestamp': timestamp
+        })
+        
+        return jsonify({'success': True})
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 @app.route('/api/detect-stuck-training', methods=['POST'])
 def detect_stuck_training():
     """Detect and fix stuck training jobs"""
@@ -1073,4 +1131,4 @@ if __name__ == '__main__':
     print("  GET  /api/health - Health check")
     print("  SocketIO: training_progress - Real-time training updates")
     
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
+    socketio.run(app, host='0.0.0.0', port=5000, debug=False)

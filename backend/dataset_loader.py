@@ -68,11 +68,15 @@ def load_javascript_dataset() -> Dict[str, Any]:
         return None
 
 def load_any_dataset(dataset_id: str, max_samples: int = 1000) -> Dict[str, Any]:
-    """Load any Hugging Face dataset by ID"""
+    """Load any Hugging Face dataset by ID or local file"""
     try:
         print(f"Loading dataset: {dataset_id}")
         
-        # Load the dataset
+        # Check if it's a local file first
+        if dataset_id.endswith('.json'):
+            return load_local_json_dataset(dataset_id, max_samples)
+        
+        # Load the dataset from Hugging Face
         ds = load_dataset(dataset_id)
         
         # Determine which split to use
@@ -82,7 +86,7 @@ def load_any_dataset(dataset_id: str, max_samples: int = 1000) -> Dict[str, Any]
         # Get sample data
         sample_data = []
         total_samples = len(dataset_split)
-        samples_to_load = min(max_samples, total_samples)
+        samples_to_load = min(max_samples, total_samples) if max_samples is not None else total_samples
         
         print(f"Loading {samples_to_load} samples from {total_samples} total...")
         
@@ -182,6 +186,88 @@ def main():
     print(f"\n✅ Successfully loaded {len(datasets)} dataset(s)")
     for dataset in datasets:
         print(f"  - {dataset['name']}: {dataset['size']}")
+
+def load_local_json_dataset(file_path: str, max_samples: int = 1000) -> Dict[str, Any]:
+    """Load a local JSON dataset file"""
+    try:
+        import os
+        full_path = os.path.join('dataset', file_path)
+        
+        if not os.path.exists(full_path):
+            return {
+                'success': False,
+                'error': f'Local file {file_path} not found'
+            }
+        
+        with open(full_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        # Handle different JSON structures
+        if isinstance(data, dict) and 'datasets' in data:
+            # Our dataset_info.json format
+            datasets = data['datasets']
+            if datasets:
+                dataset = datasets[0]  # Take first dataset
+                samples = dataset.get('samples', [])
+                
+                # Limit samples
+                limited_samples = samples[:max_samples] if max_samples is not None else samples
+                
+                return {
+                    'success': True,
+                    'name': dataset.get('name', 'Local Dataset'),
+                    'description': dataset.get('description', 'Local dataset'),
+                    'dataset_id': file_path,
+                    'total_samples': len(samples),
+                    'loaded_samples': len(limited_samples),
+                    'samples': limited_samples,
+                    'format': 'JSON',
+                    'size': f'{len(samples):,} samples',
+                    'loaded_at': time.strftime('%Y-%m-%d %H:%M:%S')
+                }
+        elif isinstance(data, dict) and 'samples' in data:
+            # Direct dataset format with samples array
+            samples = data.get('samples', [])
+            limited_samples = samples[:max_samples] if max_samples is not None else samples
+            
+            return {
+                'success': True,
+                'name': data.get('name', 'Local Dataset'),
+                'description': data.get('description', 'Local dataset'),
+                'dataset_id': file_path,
+                'total_samples': len(samples),
+                'loaded_samples': len(limited_samples),
+                'samples': limited_samples,
+                'format': 'JSON',
+                'size': f'{len(samples):,} samples',
+                'loaded_at': time.strftime('%Y-%m-%d %H:%M:%S')
+            }
+        elif isinstance(data, list):
+            # Direct list of samples
+            limited_samples = data[:max_samples] if max_samples is not None else data
+            return {
+                'success': True,
+                'name': 'Local Dataset',
+                'description': 'Local dataset from JSON file',
+                'dataset_id': file_path,
+                'total_samples': len(data),
+                'loaded_samples': len(limited_samples),
+                'samples': limited_samples,
+                'format': 'JSON',
+                'size': f'{len(data):,} samples',
+                'loaded_at': time.strftime('%Y-%m-%d %H:%M:%S')
+            }
+        
+        return {
+            'success': False,
+            'error': 'Unknown JSON format'
+        }
+        
+    except Exception as e:
+        return {
+            'success': False,
+            'error': f'Error loading local file: {str(e)}'
+        }
 
 if __name__ == '__main__':
     main()
