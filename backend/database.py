@@ -314,6 +314,11 @@ class Database:
             
             cursor.execute(query, values)
             conn.commit()
+            
+            # Check if training job was marked as COMPLETED and create automatic evaluation
+            if 'status' in updates and updates['status'] == 'COMPLETED':
+                self._create_automatic_evaluation(job_id)
+            
             return cursor.rowcount > 0
     
     def delete_training_job(self, job_id: int) -> bool:
@@ -368,6 +373,91 @@ class Database:
                 evaluations.append(eval_data)
             
             return evaluations
+    
+    def update_evaluation(self, eval_id: int, updates: Dict[str, Any]) -> bool:
+        """Update an evaluation"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            # Prepare update fields
+            update_fields = []
+            values = []
+            
+            for key, value in updates.items():
+                if key in ['before_metrics', 'after_metrics']:
+                    update_fields.append(f"{key} = ?")
+                    values.append(json.dumps(value))
+                else:
+                    update_fields.append(f"{key} = ?")
+                    values.append(value)
+            
+            if not update_fields:
+                return False
+            
+            update_fields.append("updated_at = CURRENT_TIMESTAMP")
+            values.append(eval_id)
+            
+            query = f"UPDATE evaluations SET {', '.join(update_fields)} WHERE id = ?"
+            cursor.execute(query, values)
+            conn.commit()
+            
+            return cursor.rowcount > 0
+    
+    def _create_automatic_evaluation(self, job_id: int):
+        """Create automatic evaluation when training job completes"""
+        try:
+            # Get the completed training job
+            job = self.get_training_job_by_id(job_id)
+            if not job:
+                print(f"❌ Could not find training job {job_id} for automatic evaluation")
+                return
+            
+            model_name = job.get('model_name')
+            if not model_name:
+                print(f"❌ Training job {job_id} has no model_name for evaluation")
+                return
+            
+            # Parse config to get dataset information
+            config = {}
+            if job.get('config'):
+                try:
+                    config = json.loads(job['config']) if isinstance(job['config'], str) else job['config']
+                except:
+                    config = {}
+            
+            # Get the first selected dataset for evaluation
+            selected_datasets = config.get('selectedDatasets', [])
+            if not selected_datasets:
+                print(f"❌ Training job {job_id} has no selected datasets for evaluation")
+                return
+            
+            dataset_id = selected_datasets[0]  # Use first dataset
+            
+            # Create evaluation data
+            eval_data = {
+                'model_name': model_name,
+                'dataset_id': dataset_id,
+                'evaluation_type': 'accuracy',
+                'notes': f'Automatic evaluation after {job.get("training_type", "training")} completion'
+            }
+            
+            # Add evaluation to database
+            eval_id = self.add_evaluation(eval_data)
+            print(f"✅ Created automatic evaluation {eval_id} for model {model_name}")
+            
+            # Start the evaluation
+            try:
+                from evaluation_executor import evaluation_executor
+                success = evaluation_executor.start_evaluation(eval_id, eval_data)
+                if success:
+                    print(f"🚀 Started automatic evaluation {eval_id} for {model_name}")
+                else:
+                    print(f"❌ Failed to start automatic evaluation {eval_id}")
+            except Exception as e:
+                print(f"❌ Error starting automatic evaluation {eval_id}: {e}")
+                
+        except Exception as e:
+            print(f"❌ Error creating automatic evaluation for job {job_id}: {e}")
 
 # Global database instance
 db = Database()

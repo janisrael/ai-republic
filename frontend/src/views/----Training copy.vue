@@ -120,21 +120,6 @@
               {{ job.status }}
             </span>
           </div>
-          
-          <!-- Simple Progress Status -->
-          <div class="job-progress" v-if="job.status === 'RUNNING'">
-            <div class="loading-spinner"></div>
-            <span>Training in progress...</span>
-          </div>
-          <div class="job-progress error" v-else-if="job.status === 'FAILED'">
-            <span class="error-icon">❌</span>
-            <span>Training failed</span>
-          </div>
-          <div class="job-progress success" v-else-if="job.status === 'COMPLETED'">
-            <span class="success-icon">✅</span>
-            <span>Training completed!</span>
-          </div>
-          
           <div class="job-details">
             <div class="job-metadata" v-if="job.description || job.jobType || job.maker || job.version || job.baseModel">
               <div class="metadata-row" v-if="job.baseModel">
@@ -169,7 +154,19 @@
               </span>
             </div>
             <p class="dataset-info">{{ job.datasetName }}</p>
-            <!-- <div class="job-metrics" v-if="job.metrics">
+            <div class="progress-container">
+              <div class="progress-bar" :style="{ width: job.progress + '%' }"></div>
+            </div>
+            <div class="job-meta">
+              <span v-if="job.currentStep && job.totalSteps">
+                Step {{ job.currentStep }}/{{ job.totalSteps }}
+              </span>
+              <span v-else-if="job.currentEpoch && job.totalEpochs">
+                Epoch {{ job.currentEpoch }}/{{ job.totalEpochs }}
+              </span>
+              <span>{{ formatDuration(job.elapsedTime) }}</span>
+            </div>
+            <div class="job-metrics" v-if="job.metrics">
               <div class="metric-item">
                 <span class="metric-label">Accuracy:</span>
                 <span class="metric-value">{{ job.metrics.accuracy }}%</span>
@@ -190,7 +187,7 @@
                 <span class="metric-label">Planning:</span>
                 <span class="metric-value">{{ job.metrics.planningScore }}%</span>
               </div>
-            </div> -->
+            </div>
           </div>
           <div class="job-actions">
             <button class="btn-icon" @click="viewJobDetails(job)">👁️</button>
@@ -216,7 +213,7 @@
             <h3>Training Job Information</h3>
             <div class="metadata-grid">
               <div class="form-group">
-                <label>Model Name <span class="required">*</span></label>
+                <label>Job Name <span class="required">*</span></label>
                 <input 
                   type="text" 
                   v-model="newTraining.jobName" 
@@ -301,7 +298,7 @@
             </div>
           </div>
 
-          <!-- Dynamic Model Selection -->
+          <!-- Model Selection -->
           <div class="form-group">
             <label>Base Model</label>
             <select v-model="newTraining.baseModel" class="form-control">
@@ -489,8 +486,6 @@
         </div>
       </div>
     </div>
-
-    <!-- Real-time Training Output Component -->
   </div>
 </template>
 
@@ -501,6 +496,7 @@ export default {
   name: 'TrainingView',
   components: {
     Icon
+
   },
   data() {
     return {
@@ -512,7 +508,7 @@ export default {
         jobName: '',
         description: '',
         jobType: 'experimental',
-        maker: 'TheSwordfish',
+        maker: '',
         version: '',
         type: 'lora',
         baseModel: '',
@@ -855,7 +851,7 @@ export default {
           maker: this.newTraining.maker,
           version: this.newTraining.version,
           baseModel: this.newTraining.baseModel,
-          training_type: this.newTraining.type,
+          type: this.newTraining.type,
           selectedDatasets: this.newTraining.selectedDatasets,
           trainingStrategy: this.newTraining.trainingStrategy,
           roleDefinition: this.newTraining.roleDefinition,
@@ -887,7 +883,7 @@ export default {
             modelName: result.model_name, // This is the actual model name that will be created
             baseModel: this.getModelDisplayName(this.newTraining.baseModel),
             datasetName: this.getDatasetName(),
-            status: 'PENDING',
+          status: 'RUNNING',
             progress: 0,
             currentEpoch: 0,
             totalEpochs: this.newTraining.params.epochs,
@@ -900,10 +896,10 @@ export default {
           this.showTrainingModal = false;
           
           // Show success message with model name
-          this.showSuccessMessage(`Training job "${this.newTraining.jobName}" created! Starting training...`);
+          this.showSuccessMessage(`Training job "${this.newTraining.jobName}" started! Model will be saved as "${result.model_name}"`);
           
-          // Actually start the training by calling the start-training endpoint
-          await this.startTraining(result.job_id);
+          // Simulate training progress
+          this.simulateTraining(newJob.id);
           
           // Reset form
           this.resetTrainingForm();
@@ -985,14 +981,6 @@ export default {
       const m = Math.floor((seconds % 3600) / 60);
       return h > 0 ? `${h}h ${m}m` : `${m}m`;
     },
-    
-    getCurrentTrainingJob() {
-      // Return the first running job, or the most recent job
-      const runningJob = this.trainingJobs.find(job => job.status === 'RUNNING');
-      if (runningJob) return runningJob;
-      
-      return this.trainingJobs.length > 0 ? this.trainingJobs[this.trainingJobs.length - 1] : null;
-    },
     startNewTraining() {
       this.showTrainingModal = true;
     },
@@ -1004,15 +992,11 @@ export default {
       try {
         console.log(`🚀 Starting real training for job ${jobId}`);
         
-        const response = await fetch(`http://localhost:5000/api/start-training`, {
+        const response = await fetch(`http://localhost:5000/api/training-jobs/${jobId}/start`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ 
-            job_id: jobId,
-            training_type: this.newTraining.type
-          })
+          }
         });
         
         const result = await response.json();
@@ -1020,10 +1004,12 @@ export default {
         if (result.success) {
           this.showSuccessMessage(`Real training started for job ${jobId}!`);
           
-          // Wait a moment for backend to update status, then refresh
-          setTimeout(() => {
-            this.fetchTrainingJobs();
-          }, 500);
+          // Update job status locally
+          const job = this.trainingJobs.find(j => j.id === jobId.toString());
+          if (job) {
+            job.status = 'RUNNING';
+            job.progress = 0;
+          }
           
           // Start polling for progress updates
           this.startProgressPolling(jobId);
@@ -1434,50 +1420,6 @@ export default {
   margin-bottom: 1rem;
 }
 
-.job-progress {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  margin-bottom: 1rem;
-  border-radius: 6px;
-  background: rgba(59, 130, 246, 0.1);
-  border: 1px solid rgba(59, 130, 246, 0.2);
-  color: #3b82f6;
-  font-size: 0.9rem;
-  font-weight: 500;
-}
-
-.job-progress.error {
-  background: rgba(239, 68, 68, 0.1);
-  border-color: rgba(239, 68, 68, 0.2);
-  color: #ef4444;
-}
-
-.job-progress.success {
-  background: rgba(34, 197, 94, 0.1);
-  border-color: rgba(34, 197, 94, 0.2);
-  color: #22c55e;
-}
-
-.loading-spinner {
-  width: 16px;
-  height: 16px;
-  border: 2px solid rgba(59, 130, 246, 0.3);
-  border-top: 2px solid #3b82f6;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-
-.error-icon, .success-icon {
-  font-size: 1rem;
-}
-
 .job-header h3 {
   margin: 0;
   font-size: 1.1rem;
@@ -1581,6 +1523,20 @@ export default {
   color: var(--primary);
 }
 
+.progress-container {
+  height: 6px;
+  background: #e9ecef;
+  border-radius: 3px;
+  margin-bottom: 0.5rem;
+  overflow: hidden;
+}
+
+.progress-bar {
+  height: 100%;
+  background: var(--primary);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
 
 .job-meta {
   display: flex;
@@ -1652,7 +1608,7 @@ export default {
   border-radius: 12px;
   width: 100%;
   /* max-width: 800px; */
-  /* max-height: 90vh; */
+  max-height: 90vh;
   display: flex;
   flex-direction: column;
   box-shadow: var(--shadow);

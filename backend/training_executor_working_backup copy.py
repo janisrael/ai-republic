@@ -153,10 +153,7 @@ PARAMETER top_p 0.9
 
     def _extract_dataset_samples_for_chromadb(self, dataset: Dict[str, Any]) -> list:
         chromadb_samples = []
-        # Use all_samples if available, otherwise fall back to samples_preview
-        dataset_samples = dataset.get('metadata', {}).get('all_samples', 
-                                                         dataset.get('metadata', {}).get('samples_preview', []))
-        for sample in dataset_samples:
+        for sample in dataset.get('metadata', {}).get('samples_preview', []):
             combined_text = "\n".join(
                 f"{k.capitalize()}: {v}" for k, v in sample.items() if v
             )
