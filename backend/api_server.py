@@ -549,20 +549,28 @@ def create_evaluation():
             'model_name': data['model_name'],
             'dataset_id': data['dataset_id'],
             'evaluation_type': data.get('evaluation_type', 'accuracy'),
-            'before_metrics': data.get('before_metrics', {}),
-            'after_metrics': data.get('after_metrics', {}),
-            'improvement': data.get('improvement', 0.0),
+            'status': 'PENDING',
             'notes': data.get('notes', '')
         }
         
         # Save to database
         eval_id = db.add_evaluation(eval_data)
         
-        return jsonify({
-            'success': True,
-            'message': 'Evaluation created successfully',
-            'evaluation_id': eval_id
-        })
+        # Start real evaluation
+        from evaluation_executor import evaluation_executor
+        success = evaluation_executor.start_evaluation(eval_id, eval_data)
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': 'Evaluation started successfully',
+                'evaluation_id': eval_id
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to start evaluation'
+            }), 500
         
     except Exception as e:
         return jsonify({
@@ -601,6 +609,28 @@ def update_evaluation(eval_id):
                 'error': 'Evaluation not found'
             }), 404
             
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/evaluations/<int:eval_id>/status', methods=['GET'])
+def get_evaluation_status(eval_id):
+    """Get evaluation status"""
+    try:
+        evaluation = db.get_evaluation_by_id(eval_id)
+        if not evaluation:
+            return jsonify({
+                'success': False,
+                'error': 'Evaluation not found'
+            }), 404
+        
+        return jsonify({
+            'success': True,
+            'evaluation': evaluation
+        })
+        
     except Exception as e:
         return jsonify({
             'success': False,
@@ -1107,6 +1137,174 @@ def detect_stuck_training():
             'stuck_jobs_found': len(stuck_jobs),
             'stuck_jobs': stuck_jobs,
             'message': f'Found and fixed {len(stuck_jobs)} stuck training jobs'
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/training-history', methods=['GET'])
+def get_training_history():
+    """Get comprehensive training history with detailed information"""
+    try:
+        # Get all training jobs
+        jobs = db.get_training_jobs()
+        
+        # Get all datasets for reference
+        datasets = db.get_all_datasets()
+        dataset_map = {d['id']: d for d in datasets}
+        
+        # Process each job with detailed information
+        history = []
+        for job in jobs:
+            # Get dataset information
+            dataset_info = None
+            if job.get('dataset_id'):
+                dataset_info = dataset_map.get(job['dataset_id'])
+            
+            # Calculate duration if completed
+            duration = None
+            if job['status'] == 'COMPLETED' and job.get('started_at') and job.get('completed_at'):
+                try:
+                    from datetime import datetime
+                    start = datetime.fromisoformat(job['started_at'])
+                    end = datetime.fromisoformat(job['completed_at'])
+                    duration_seconds = (end - start).total_seconds()
+                    duration = {
+                        'seconds': int(duration_seconds),
+                        'minutes': int(duration_seconds / 60),
+                        'hours': int(duration_seconds / 3600),
+                        'formatted': f"{int(duration_seconds // 3600)}h {int((duration_seconds % 3600) // 60)}m {int(duration_seconds % 60)}s"
+                    }
+                except:
+                    duration = None
+            
+            # Parse configuration
+            config = {}
+            if job.get('config'):
+                try:
+                    config = json.loads(job['config']) if isinstance(job['config'], str) else job['config']
+                except:
+                    config = {}
+            
+            # Create detailed history entry
+            history_entry = {
+                'id': job['id'],
+                'name': job['name'],
+                'description': job.get('description', ''),
+                'status': job['status'],
+                'training_type': job.get('training_type', 'LoRA'),
+                'model_name': job['model_name'],
+                'base_model': job.get('base_model', ''),
+                'created_at': job['created_at'],
+                'started_at': job.get('started_at'),
+                'completed_at': job.get('completed_at'),
+                'duration': duration,
+                'progress': job.get('progress', 0),
+                'error_message': job.get('error_message'),
+                'config': config,
+                'dataset': {
+                    'id': job.get('dataset_id'),
+                    'name': dataset_info['name'] if dataset_info else 'Unknown Dataset',
+                    'description': dataset_info.get('description', '') if dataset_info else '',
+                    'sample_count': dataset_info.get('loaded_samples', 0) if dataset_info else 0,
+                    'total_samples': dataset_info.get('total_samples', 0) if dataset_info else 0
+                } if job.get('dataset_id') else None,
+                'training_parameters': {
+                    'epochs': config.get('epochs', 'N/A'),
+                    'learning_rate': config.get('learning_rate', 'N/A'),
+                    'batch_size': config.get('batch_size', 'N/A'),
+                    'lora_rank': config.get('lora_rank', 'N/A'),
+                    'lora_alpha': config.get('lora_alpha', 'N/A')
+                },
+                'performance': {
+                    'final_loss': config.get('final_loss'),
+                    'best_loss': config.get('best_loss'),
+                    'convergence_epoch': config.get('convergence_epoch')
+                }
+            }
+            
+            history.append(history_entry)
+        
+        # Sort by creation date (newest first)
+        history.sort(key=lambda x: x['created_at'], reverse=True)
+        
+        return jsonify({
+            'success': True,
+            'history': history,
+            'total_jobs': len(history),
+            'completed_jobs': len([h for h in history if h['status'] == 'COMPLETED']),
+            'failed_jobs': len([h for h in history if h['status'] == 'FAILED']),
+            'running_jobs': len([h for h in history if h['status'] == 'RUNNING'])
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/training-history/<int:job_id>', methods=['GET'])
+def get_training_job_details(job_id):
+    """Get detailed information for a specific training job"""
+    try:
+        job = db.get_training_job_by_id(job_id)
+        if not job:
+            return jsonify({
+                'success': False,
+                'error': 'Training job not found'
+            }), 404
+        
+        # Get dataset information
+        dataset_info = None
+        if job.get('dataset_id'):
+            dataset_info = db.get_dataset_by_id(job['dataset_id'])
+        
+        # Parse configuration
+        config = {}
+        if job.get('config'):
+            try:
+                config = json.loads(job['config']) if isinstance(job['config'], str) else job['config']
+            except:
+                config = {}
+        
+        # Calculate detailed metrics
+        details = {
+            'id': job['id'],
+            'name': job['name'],
+            'description': job.get('description', ''),
+            'status': job['status'],
+            'training_type': job.get('training_type', 'LoRA'),
+            'model_name': job['model_name'],
+            'base_model': job.get('base_model', ''),
+            'created_at': job['created_at'],
+            'started_at': job.get('started_at'),
+            'completed_at': job.get('completed_at'),
+            'progress': job.get('progress', 0),
+            'error_message': job.get('error_message'),
+            'config': config,
+            'dataset': dataset_info,
+            'training_logs': config.get('training_logs', []),
+            'metrics': {
+                'final_loss': config.get('final_loss'),
+                'best_loss': config.get('best_loss'),
+                'convergence_epoch': config.get('convergence_epoch'),
+                'total_epochs': config.get('epochs'),
+                'learning_rate': config.get('learning_rate'),
+                'batch_size': config.get('batch_size')
+            },
+            'system_info': {
+                'gpu_used': config.get('gpu_used', False),
+                'memory_peak': config.get('memory_peak'),
+                'disk_usage': config.get('disk_usage')
+            }
+        }
+        
+        return jsonify({
+            'success': True,
+            'job_details': details
         })
         
     except Exception as e:

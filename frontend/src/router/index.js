@@ -7,6 +7,7 @@ const ModelComparison = () => import('@/views/ModelComparison.vue');
 const Training = () => import('@/views/Training.vue');
 const Datasets = () => import('@/views/Datasets.vue');
 const Evaluation = () => import('@/views/Evaluation.vue');
+const TrainingHistory = () => import('@/views/TrainingHistory.vue');
 
 const routes = [
   {
@@ -48,6 +49,12 @@ const routes = [
     name: 'Evaluation',
     component: Evaluation,
     meta: { title: 'Model Evaluation' }
+  },
+  {
+    path: '/training-history',
+    name: 'TrainingHistory',
+    component: TrainingHistory,
+    meta: { title: 'Training History' }
   },
   {
     path: '/:pathMatch(.*)*',

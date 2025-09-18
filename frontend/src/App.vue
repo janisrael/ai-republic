@@ -125,6 +125,17 @@ onMounted(() => {
           <a 
             href="#" 
             class="nav-link"
+            :class="{ 'active': activeRoute === 'traininghistory' }"
+            @click.prevent="navigateTo('TrainingHistory')"
+          >
+            <span class="material-icons-round">history</span>
+            <span>History</span>
+          </a>
+        </li>
+        <li class="nav-item">
+          <a 
+            href="#" 
+            class="nav-link"
             :class="{ 'active': activeRoute === 'datasets' }"
             @click.prevent="navigateTo('Datasets')"
           >

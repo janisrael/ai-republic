@@ -368,6 +368,35 @@ class Database:
                 evaluations.append(eval_data)
             
             return evaluations
+    
+    def update_evaluation(self, eval_id: int, updates: Dict[str, Any]) -> bool:
+        """Update an evaluation"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            # Prepare update fields
+            update_fields = []
+            values = []
+            
+            for key, value in updates.items():
+                if key in ['before_metrics', 'after_metrics']:
+                    update_fields.append(f"{key} = ?")
+                    values.append(json.dumps(value))
+                else:
+                    update_fields.append(f"{key} = ?")
+                    values.append(value)
+            
+            if not update_fields:
+                return False
+            
+            update_fields.append("updated_at = CURRENT_TIMESTAMP")
+            values.append(eval_id)
+            
+            query = f"UPDATE evaluations SET {', '.join(update_fields)} WHERE id = ?"
+            cursor.execute(query, values)
+            conn.commit()
+            
+            return cursor.rowcount > 0
 
 # Global database instance
 db = Database()
