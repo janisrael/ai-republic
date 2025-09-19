@@ -69,6 +69,10 @@ class TrainingExecutor:
                 'error_message': str(e),
                 'completed_at': datetime.now().isoformat()
             })
+        finally:
+            # Clean up running jobs dictionary
+            if job_id in self.running_jobs:
+                del self.running_jobs[job_id]
 
     # ====== RAG TRAINING ======
     def _execute_rag_training(self, job_id: int, job_data: Dict[str, Any]):
@@ -95,6 +99,10 @@ class TrainingExecutor:
             })
         except Exception as e:
             raise Exception(f"RAG training failed: {str(e)}")
+        finally:
+            # Clean up running jobs dictionary
+            if job_id in self.running_jobs:
+                del self.running_jobs[job_id]
 
     # ====== LoRA TRAINING ======
     def _execute_lora_training(self, job_id: int, job_data: Dict[str, Any]):
@@ -121,6 +129,10 @@ class TrainingExecutor:
             })
         except Exception as e:
             raise Exception(f"LoRA training failed: {str(e)}")
+        finally:
+            # Clean up running jobs dictionary
+            if job_id in self.running_jobs:
+                del self.running_jobs[job_id]
 
     # ====== SUPPORTING FUNCTIONS ======
     def _create_modelfile(self, job_name: str, base_model: str, config: Dict[str, Any]):
@@ -210,15 +222,42 @@ PARAMETER top_p 0.9
                                                          dataset.get('metadata', {}).get('samples_preview', []))
         
         for sample in dataset_samples:
-            instr = sample.get('instruction', '')
-            output = sample.get('output', '')
-            if instr and output:
-                samples.append({
-                    'instruction': instr,
-                    'input': sample.get('input', ''),
-                    'output': output,
-                    'system': sample.get('system', '')
-                })
+            # Handle standard format (Codealpaca, etc.)
+            if 'instruction' in sample and 'output' in sample:
+                instr = sample.get('instruction', '')
+                output = sample.get('output', '')
+                if instr and output:
+                    samples.append({
+                        'instruction': instr,
+                        'input': sample.get('input', ''),
+                        'output': output,
+                        'system': sample.get('system', '')
+                    })
+            
+            # Handle Devops format (content field with stringified JSON)
+            elif 'content' in sample:
+                try:
+                    import ast
+                    content_str = sample.get('content', '')
+                    # Parse the stringified dictionary
+                    content_dict = ast.literal_eval(content_str)
+                    
+                    instruction = content_dict.get('Instruction', '')
+                    response = content_dict.get('Response', '')
+                    prompt = content_dict.get('Prompt', '')
+                    
+                    if instruction and response:
+                        samples.append({
+                            'instruction': instruction,
+                            'input': prompt,
+                            'output': response,
+                            'system': ''
+                        })
+                except (ValueError, SyntaxError) as e:
+                    print(f"Warning: Could not parse Devops sample: {e}")
+                    continue
+        
+        print(f"✅ Converted {len(samples)} samples from dataset '{dataset.get('name', 'Unknown')}'")
         return samples
 
     def _save_jsonl(self, data: list, filepath: str):
