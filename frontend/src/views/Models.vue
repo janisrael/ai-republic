@@ -2351,8 +2351,8 @@ export default {
 /* Chat Test Button */
 .chat-test-btn {
   position: absolute;
-  top: -8px;
-  right: -8px;
+  top: -84px;
+  left: -18px;
   width: 32px;
   height: 32px;
   border-radius: 50%;
