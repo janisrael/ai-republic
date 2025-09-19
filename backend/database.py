@@ -469,6 +469,33 @@ class Database:
                 print(f"❌ Training job {job_id} has no model_name for evaluation")
                 return
             
+            # Get the actual Ollama model name from the training job
+            actual_model_name = job.get('actual_model_name')
+            if not actual_model_name:
+                # Fallback: convert model name to actual Ollama model name (replace version with :latest)
+                if ':' in model_name:
+                    base_name = model_name.split(':')[0]
+                    actual_model_name = f"{base_name}:latest"
+                else:
+                    actual_model_name = model_name
+                print(f"⚠️ No actual_model_name found, using fallback: {model_name} -> {actual_model_name}")
+            else:
+                print(f"✅ Using stored actual model name: {actual_model_name}")
+            
+            # Verify the model exists in Ollama
+            try:
+                import subprocess
+                result = subprocess.run(['ollama', 'list'], capture_output=True, text=True, timeout=5)
+                if actual_model_name not in result.stdout:
+                    print(f"⚠️ Model {actual_model_name} not found in Ollama, using fallback")
+                    if ':' in model_name:
+                        base_name = model_name.split(':')[0]
+                        actual_model_name = f"{base_name}:latest"
+                    else:
+                        actual_model_name = model_name
+            except:
+                print(f"⚠️ Could not verify model existence, using {actual_model_name}")
+            
             # Parse config to get dataset information
             config = {}
             if job.get('config'):
@@ -485,9 +512,13 @@ class Database:
             
             dataset_id = selected_datasets[0]  # Use first dataset
             
+            # Get base model from training job config
+            base_model = config.get('baseModel', 'llama3.2:latest')
+            
             # Create evaluation data
             eval_data = {
-                'model_name': model_name,
+                'model_name': actual_model_name,  # Use actual Ollama model name
+                'base_model': base_model,  # Base model for before/after comparison
                 'dataset_id': dataset_id,
                 'evaluation_type': 'accuracy',
                 'notes': f'Automatic evaluation after {job.get("training_type", "training")} completion'

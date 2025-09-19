@@ -764,6 +764,10 @@ def update_evaluation(eval_id):
             updates['improvement'] = data['improvement']
         if 'notes' in data:
             updates['notes'] = data['notes']
+        if 'model_name' in data:
+            updates['model_name'] = data['model_name']
+        if 'status' in data:
+            updates['status'] = data['status']
         
         # Update in database
         success = db.update_evaluation(eval_id, updates)

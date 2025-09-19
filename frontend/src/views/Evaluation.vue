@@ -97,7 +97,14 @@
 
               <div class="metric">
                 <div class="metric-label">Precision</div>
-                <div class="metric-value">{{ (evaluation.metrics?.precision || 0).toFixed(3) }}</div>
+                <div class="metric-value">
+                  {{ (evaluation.metrics?.precision || 0).toFixed(3) }}
+                  <span class="metric-trend"
+                    :class="{ 'up': getPrecisionChange(evaluation) > 0, 'down': getPrecisionChange(evaluation) < 0 }">
+                    {{ getPrecisionChange(evaluation) > 0 ? '↑' : '↓' }}
+                    {{ Math.abs(getPrecisionChange(evaluation)).toFixed(1) }}%
+                  </span>
+                </div>
                 <div class="metric-bar">
                   <div class="metric-bar-fill" :style="{ width: ((evaluation.metrics?.precision || 0) * 100) + '%' }"
                     :class="getMetricClass((evaluation.metrics?.precision || 0))"></div>
@@ -106,7 +113,14 @@
 
               <div class="metric">
                 <div class="metric-label">Recall</div>
-                <div class="metric-value">{{ (evaluation.metrics?.recall || 0).toFixed(3) }}</div>
+                <div class="metric-value">
+                  {{ (evaluation.metrics?.recall || 0).toFixed(3) }}
+                  <span class="metric-trend"
+                    :class="{ 'up': getRecallChange(evaluation) > 0, 'down': getRecallChange(evaluation) < 0 }">
+                    {{ getRecallChange(evaluation) > 0 ? '↑' : '↓' }}
+                    {{ Math.abs(getRecallChange(evaluation)).toFixed(1) }}%
+                  </span>
+                </div>
                 <div class="metric-bar">
                   <div class="metric-bar-fill" :style="{ width: ((evaluation.metrics?.recall || 0) * 100) + '%' }"
                     :class="getMetricClass((evaluation.metrics?.recall || 0))"></div>
@@ -115,7 +129,14 @@
 
               <div class="metric">
                 <div class="metric-label">F1 Score</div>
-                <div class="metric-value">{{ (evaluation.metrics?.f1 || 0).toFixed(3) }}</div>
+                <div class="metric-value">
+                  {{ (evaluation.metrics?.f1 || 0).toFixed(3) }}
+                  <span class="metric-trend"
+                    :class="{ 'up': getF1Change(evaluation) > 0, 'down': getF1Change(evaluation) < 0 }">
+                    {{ getF1Change(evaluation) > 0 ? '↑' : '↓' }}
+                    {{ Math.abs(getF1Change(evaluation)).toFixed(1) }}%
+                  </span>
+                </div>
                 <div class="metric-bar">
                   <div class="metric-bar-fill" :style="{ width: ((evaluation.metrics?.f1 || 0) * 100) + '%' }"
                     :class="getMetricClass((evaluation.metrics?.f1 || 0))"></div>
@@ -821,11 +842,17 @@ export default {
         const evaluationsResponse = await fetch('http://localhost:5000/api/evaluations');
         const evaluationsResult = await evaluationsResponse.json();
         
-        // Create evaluation lookup map
+        // Create evaluation lookup map with flexible matching
         const evaluationMap = {};
         if (evaluationsResult.success) {
           evaluationsResult.evaluations.forEach(evaluation => {
             evaluationMap[evaluation.model_name] = evaluation;
+            
+            // Also create mappings for base names (without version) for flexible matching
+            const baseName = evaluation.model_name.split(':')[0];
+            if (!evaluationMap[baseName]) {
+              evaluationMap[baseName] = evaluation;
+            }
           });
         }
         
@@ -836,7 +863,22 @@ export default {
         this.evaluations = jobsResult.jobs
           .filter(job => job.status === 'COMPLETED')
           .map(job => {
-            const evaluation = evaluationMap[job.model_name];
+            // Try multiple matching strategies for evaluation
+            let evaluation = evaluationMap[job.model_name];
+            
+            // If no exact match, try base name matching
+            if (!evaluation && job.model_name) {
+              const baseName = job.model_name.split(':')[0];
+              evaluation = evaluationMap[baseName];
+            }
+            
+            // If still no match, try finding any evaluation with similar name
+            if (!evaluation && job.model_name) {
+              const baseName = job.model_name.split(':')[0];
+              evaluation = evaluationsResult.evaluations.find(evaluationItem => 
+                evaluationItem.model_name.includes(baseName)
+              );
+            }
             const config = typeof job.config === 'string' ? JSON.parse(job.config) : job.config;
             
             const evaluationData = {
@@ -852,11 +894,23 @@ export default {
               isSelected: false,
               trainingType: job.training_type === 'rag' ? 'RAG Training' : 'LoRA Fine-tuning',
               baseModel: job.base_model || '',
-              metrics: evaluation ? evaluation.after_metrics || {} : {},
-              beforeMetrics: evaluation ? evaluation.before_metrics || {} : {},
+              metrics: evaluation ? {
+                accuracy: (evaluation.after_metrics?.accuracy || 0) * 100, // Convert to percentage
+                precision: evaluation.after_metrics?.precision || 0,
+                recall: evaluation.after_metrics?.recall || 0,
+                f1: evaluation.after_metrics?.f1 || 0,
+                inferenceTime: evaluation.after_metrics?.inferenceTime || 0
+              } : {},
+              beforeMetrics: evaluation ? {
+                accuracy: (evaluation.before_metrics?.accuracy || 0) * 100, // Convert to percentage
+                precision: evaluation.before_metrics?.precision || 0,
+                recall: evaluation.before_metrics?.recall || 0,
+                f1: evaluation.before_metrics?.f1 || 0,
+                inferenceTime: evaluation.before_metrics?.inferenceTime || 0
+              } : {},
               accuracyChange: evaluation ? evaluation.improvement || 0 : 0,
               notes: evaluation ? evaluation.notes || '' : `Training job: ${job.name} - ${job.description || 'No description'}`,
-              evaluationStatus: evaluation ? 'Evaluated' : 'Not Evaluated',
+              evaluationStatus: evaluation ? evaluation.status : 'Not Evaluated',
               hasEvaluation: !!evaluation
             };
             
@@ -930,6 +984,24 @@ export default {
       if (value >= 0.8) return 'good';
       if (value >= 0.7) return 'fair';
       return 'poor';
+    },
+    getPrecisionChange(evaluation) {
+      if (!evaluation.beforeMetrics?.precision || !evaluation.metrics?.precision) return 0;
+      const before = evaluation.beforeMetrics.precision;
+      const after = evaluation.metrics.precision;
+      return ((after - before) / before) * 100;
+    },
+    getRecallChange(evaluation) {
+      if (!evaluation.beforeMetrics?.recall || !evaluation.metrics?.recall) return 0;
+      const before = evaluation.beforeMetrics.recall;
+      const after = evaluation.metrics.recall;
+      return ((after - before) / before) * 100;
+    },
+    getF1Change(evaluation) {
+      if (!evaluation.beforeMetrics?.f1 || !evaluation.metrics?.f1) return 0;
+      const before = evaluation.beforeMetrics.f1;
+      const after = evaluation.metrics.f1;
+      return ((after - before) / before) * 100;
     },
     toggleFavorite(id) {
       const evaluation = this.evaluations.find(e => e.id === id);
