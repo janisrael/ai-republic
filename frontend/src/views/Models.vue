@@ -27,11 +27,18 @@
         <span class="material-icons-round">search</span>
       </div>
       <div class="action-buttons">
-        <select class="form-control" v-model="selectedType">
-          <option value="">All Types</option>
-          <option v-for="type in modelTypes" :key="type" :value="type">
-            {{ type }}
+        <select class="form-control" v-model="selectedCapability">
+          <option value="">All Capabilities</option>
+          <option v-for="capability in availableCapabilities" :key="capability" :value="capability">
+            {{ capability }}
           </option>
+        </select>
+        <select class="form-control" v-model="sortBy">
+          <option value="ranking">Ranking</option>
+          <option value="name">Name (A-Z)</option>
+          <option value="size">Size</option>
+          <option value="parameters">Parameters</option>
+          <option value="context">Context Length</option>
         </select>
           <button class="btn btn-secondary" @click="fetchLocalModels" :disabled="isLoadingModels">
             <span class="material-icons-round">{{ isLoadingModels ? 'refresh' : 'refresh' }}</span>
@@ -156,22 +163,23 @@
         </div>
       </div>
 
-      <!-- Model Rankings -->
+      <!-- Model Rankings (Main Display) -->
       <div class="rankings-section">
         <div class="section-header">
           <h3>
             <span class="material-icons-round">emoji_events</span>
-            Model Rankings
+            AI Models
           </h3>
-          <p>Top performing models by parameters and capabilities</p>
+          <p>{{ filteredAndSortedModels.length }} models available</p>
         </div>
         
         <div class="rankings-grid">
           <div 
-            v-for="(model, index) in rankedModels.slice(0, 7)" 
+            v-for="(model, index) in filteredAndSortedModels" 
             :key="model.name"
-            class="ranking-card"
+            class="ranking-card clickable-card"
             :class="{ 'top-rank': index === 0 }"
+            @click="viewModelDetails(model)"
           >
             <div class="rank-number">
               <span class="rank-badge" :class="getRankClass(index)">{{ index + 1 }}</span>
@@ -223,9 +231,10 @@
         </div>
       </div>
 
-    <div class="models-grid">
+    <!-- Old models-grid section - keeping for reference but not displaying -->
+    <div class="models-grid" style="display: none;">
       <div 
-        v-for="model in filteredModels" 
+        v-for="model in filteredAndSortedModels" 
         :key="model.id" 
           class="model-card"
       >
@@ -239,7 +248,8 @@
               <p>{{ model.description || 'No description provided' }}</p>
             <div class="model-meta">
               <span>{{ model.trainingTime }}</span>
-              <span>{{ model.datasetSize }}</span>
+              <span>{{ model.details?.parameters || 'Unknown' }}</span>
+              <span>{{ model.details?.context_length || 'Unknown' }} ctx</span>
           </div>
           
             <!-- Job Details Section -->
@@ -282,7 +292,7 @@
       </div>
       
       <!-- Empty State -->
-      <div v-if="filteredModels.length === 0" class="empty-state">
+      <div v-if="filteredAndSortedModels.length === 0" class="empty-state">
         <div class="empty-icon">🤖</div>
         <h3>No models found</h3>
         <p>Get started by creating your first AI model or refreshing to load local models</p>
@@ -514,6 +524,106 @@
         </div>
       </div>
     </div>
+
+    <!-- Model Details Modal -->
+    <div v-if="showModelDetailsModal" class="modal-overlay" @click.self="showModelDetailsModal = false">
+      <div class="modal-content neumorphic-card model-details-modal">
+        <div class="modal-header">
+          <h2>Model Details: {{ selectedModelForDetails?.name }}</h2>
+          <button class="btn-icon" @click="showModelDetailsModal = false">✕</button>
+        </div>
+        
+        <div class="modal-body">
+          <div v-if="selectedModelForDetails" class="model-details-content">
+            <!-- Basic Information -->
+            <div class="detail-section">
+              <h4>Basic Information</h4>
+              <div class="detail-grid">
+                <div class="detail-item">
+                  <span class="label">Name:</span>
+                  <span class="value">{{ selectedModelForDetails.name }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">Type:</span>
+                  <span class="value">{{ selectedModelForDetails.type }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">Architecture:</span>
+                  <span class="value">{{ selectedModelForDetails.details?.architecture || 'Unknown' }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">Parameters:</span>
+                  <span class="value">{{ selectedModelForDetails.details?.parameters || 'Unknown' }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">Context Length:</span>
+                  <span class="value">{{ selectedModelForDetails.details?.context_length || 'Unknown' }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">Quantization:</span>
+                  <span class="value">{{ selectedModelForDetails.details?.quantization || 'Unknown' }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Configuration -->
+            <div class="detail-section">
+              <h4>Configuration</h4>
+              <div class="detail-grid">
+                <div class="detail-item">
+                  <span class="label">Temperature:</span>
+                  <span class="value">{{ selectedModelForDetails.details?.temperature || 'Unknown' }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">Top P:</span>
+                  <span class="value">{{ selectedModelForDetails.details?.top_p || 'Unknown' }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">License:</span>
+                  <span class="value">{{ selectedModelForDetails.details?.license || 'Unknown' }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">Size:</span>
+                  <span class="value">{{ selectedModelForDetails.trainingTime || 'Unknown' }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Capabilities -->
+            <div class="detail-section">
+              <h4>Capabilities</h4>
+              <div class="capabilities-grid">
+                <span 
+                  v-for="capability in selectedModelForDetails.details?.capabilities" 
+                  :key="capability"
+                  class="capability-tag large"
+                >
+                  {{ capability }}
+                </span>
+              </div>
+            </div>
+
+            <!-- System Prompt -->
+            <div v-if="selectedModelForDetails.details?.system_prompt" class="detail-section">
+              <h4>System Prompt</h4>
+              <div class="system-prompt">
+                <p>{{ selectedModelForDetails.details.system_prompt }}</p>
+              </div>
+            </div>
+
+            <!-- Description -->
+            <div v-if="selectedModelForDetails.description" class="detail-section">
+              <h4>Description</h4>
+              <p>{{ selectedModelForDetails.description }}</p>
+            </div>
+          </div>
+        </div>
+        
+        <div class="modal-footer">
+          <button class="btn btn-secondary" @click="showModelDetailsModal = false">Close</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -524,12 +634,15 @@ export default {
     return {
       searchQuery: '',
       selectedType: '',
-      sortBy: 'name',
+      selectedCapability: '',
+      sortBy: 'ranking',
       activeDropdown: null,
       showCreateModelModal: false,
       showDeleteModal: false,
       showDeployModal: false,
       showTestModal: false,
+      showModelDetailsModal: false,
+      selectedModelForDetails: null,
       editingModel: null,
       modelToDelete: null,
       selectedModel: null,
@@ -686,7 +799,20 @@ export default {
         };
       });
     },
-    filteredModels() {
+    availableCapabilities() {
+      const capabilities = new Set();
+      this.models.forEach(model => {
+        if (model.details?.capabilities) {
+          model.details.capabilities.forEach(cap => capabilities.add(cap));
+        }
+      });
+      return Array.from(capabilities).sort();
+    },
+    
+    filteredAndSortedModels() {
+      if (!this.models || !Array.isArray(this.models)) {
+        return [];
+      }
       let filtered = [...this.models];
       
       // Filter by search query
@@ -699,19 +825,31 @@ export default {
         );
       }
       
-      // Filter by type
-      if (this.selectedType) {
-        filtered = filtered.filter(model => model.type === this.selectedType);
+      // Filter by capability
+      if (this.selectedCapability) {
+        filtered = filtered.filter(model => 
+          model.details?.capabilities?.includes(this.selectedCapability)
+        );
       }
       
       // Sort models
       return filtered.sort((a, b) => {
-        if (this.sortBy === 'name') {
+        if (this.sortBy === 'ranking') {
+          return this.calculateModelScore(b) - this.calculateModelScore(a);
+        } else if (this.sortBy === 'name') {
           return a.name.localeCompare(b.name);
-        } else if (this.sortBy === 'date') {
-          return new Date(b.updatedAt) - new Date(a.updatedAt);
-        } else if (this.sortBy === 'accuracy') {
-          return b.accuracy - a.accuracy;
+        } else if (this.sortBy === 'size') {
+          const aSize = this.parseModelSize(a.trainingTime);
+          const bSize = this.parseModelSize(b.trainingTime);
+          return bSize - aSize;
+        } else if (this.sortBy === 'parameters') {
+          const aParams = this.parseParameters(a.details?.parameters);
+          const bParams = this.parseParameters(b.details?.parameters);
+          return bParams - aParams;
+        } else if (this.sortBy === 'context') {
+          const aCtx = parseInt(a.details?.context_length) || 0;
+          const bCtx = parseInt(b.details?.context_length) || 0;
+          return bCtx - aCtx;
         }
         return 0;
       });
@@ -873,8 +1011,9 @@ export default {
     },
     
     viewModelDetails(model) {
-      // In a real app, this would navigate to a detailed view
-      console.log('Viewing model:', model.name);
+      this.selectedModelForDetails = model;
+      this.showModelDetailsModal = true;
+      console.log('Viewing model details:', model);
     },
     
     toggleModelFavorite(model) {
@@ -1097,8 +1236,8 @@ export default {
             type: this.getModelType(model.name),
             description: this.getModelDescription(model.name),
             accuracy: this.getModelAccuracy(model.name),
-            trainingTime: this.formatModelSize(model.size),
-            datasetSize: this.getModelSize(model.size),
+            trainingTime: this.formatModelSize(model.modified),
+            datasetSize: this.getModelSize(model.modified),
             updatedAt: this.parseModelDate(model.modified),
             tags: this.getModelTags(model.name),
             isFavorite: this.isFavoriteModel(model.name),
@@ -1193,16 +1332,24 @@ export default {
       return 85.0;
     },
     
-    formatModelSize(size) {
-      if (!size) return 'Unknown';
-      const gb = size / (1024 * 1024 * 1024);
-      return `${gb.toFixed(1)} GB`;
+    formatModelSize(modified) {
+      if (!modified) return 'Unknown';
+      // Extract size from modified field like "7.4 GB 49 minutes ago"
+      const sizeMatch = modified.match(/(\d+\.?\d*)\s*GB/);
+      if (sizeMatch) {
+        return `${sizeMatch[1]} GB`;
+      }
+      return 'Unknown';
     },
     
-    getModelSize(size) {
-      if (!size) return 'Unknown';
-      const gb = size / (1024 * 1024 * 1024);
-      return `${gb.toFixed(1)}GB`;
+    getModelSize(modified) {
+      if (!modified) return 'Unknown';
+      // Extract size from modified field like "7.4 GB 49 minutes ago"
+      const sizeMatch = modified.match(/(\d+\.?\d*)\s*GB/);
+      if (sizeMatch) {
+        return `${sizeMatch[1]}GB`;
+      }
+      return 'Unknown';
     },
     
     getModelTags(name) {
@@ -1227,6 +1374,18 @@ export default {
     isFavoriteModel(name) {
       // Mark Agimat as favorite by default
       return name.toLowerCase().includes('agimat');
+    },
+    
+    parseModelSize(sizeString) {
+      if (!sizeString) return 0;
+      const match = sizeString.match(/(\d+\.?\d*)\s*GB/);
+      return match ? parseFloat(match[1]) : 0;
+    },
+    
+    parseParameters(paramString) {
+      if (!paramString) return 0;
+      const match = paramString.match(/(\d+\.?\d*)\s*B/);
+      return match ? parseFloat(match[1]) : 0;
     },
     
     parseModelDate(dateString) {
@@ -1744,6 +1903,82 @@ export default {
   font-weight: 500;
 }
 
+/* Model Details Modal */
+.model-details-modal {
+  max-width: 700px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.model-details-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.detail-section h4 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #333;
+  margin: 0 0 1rem 0;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #eee;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.detail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.detail-item .label {
+  font-size: 0.85rem;
+  color: #666;
+  font-weight: 500;
+}
+
+.detail-item .value {
+  font-size: 0.95rem;
+  color: #333;
+  font-weight: 600;
+}
+
+.capabilities-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.capability-tag.large {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  background: #e3f2fd;
+  color: #1976d2;
+  border-radius: 12px;
+  font-weight: 500;
+}
+
+.system-prompt {
+  background: #f8f9fa;
+  padding: 1rem;
+  border-radius: 8px;
+  border-left: 4px solid #4e73df;
+}
+
+.system-prompt p {
+  margin: 0;
+  color: #333;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .actions-bar {
@@ -1878,6 +2113,16 @@ export default {
 .ranking-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+.clickable-card {
+  cursor: pointer;
+}
+
+.clickable-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  border-color: var(--primary, #4e73df);
 }
 
 .ranking-card.top-rank {
