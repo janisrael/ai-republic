@@ -107,7 +107,8 @@ def load_new_dataset():
                     'loaded_at': result['loaded_at'],
                     'split_used': result.get('split_used', 'train'),
                     'samples_preview': result['samples'][:10],  # Store first 10 samples as preview
-                    'all_samples': result['samples']  # Store all samples for training
+                    'all_samples': result['samples'],  # Store all samples for training
+                    'format_analysis': result['metadata'].get('format_analysis')  # Include format analysis!
                 }
             }
             
@@ -180,8 +181,168 @@ def toggle_favorite(dataset_id):
         }), 500
 
 
-def sanitize_model_name(job_name):
-    """Convert job name to valid Ollama model name"""
+def get_model_details_from_ollama(model_name):
+    """Get detailed model information from ollama show command"""
+    try:
+        result = subprocess.run(['ollama', 'show', model_name], capture_output=True, text=True, timeout=15)
+        
+        if result.returncode != 0:
+            # Fallback to basic capabilities if ollama show fails
+            return get_fallback_model_details(model_name)
+        
+        output = result.stdout
+        details = {
+            'capabilities': [],
+            'architecture': 'Unknown',
+            'parameters': 'Unknown',
+            'context_length': 'Unknown',
+            'quantization': 'Unknown',
+            'temperature': 0.7,
+            'top_p': 0.9,
+            'system_prompt': '',
+            'license': 'Unknown'
+        }
+        
+        # Parse capabilities section
+        capabilities_match = re.search(r'Capabilities\s*\n((?:\s+\w+\s*\n?)+)', output)
+        if capabilities_match:
+            capabilities_text = capabilities_match.group(1)
+            capabilities = re.findall(r'\s+(\w+)', capabilities_text)
+            details['capabilities'] = capabilities
+        
+        # Parse architecture
+        arch_match = re.search(r'architecture\s+(\w+)', output)
+        if arch_match:
+            details['architecture'] = arch_match.group(1)
+        
+        # Parse parameters
+        param_match = re.search(r'parameters\s+([\d.]+[BMK]?)', output)
+        if param_match:
+            details['parameters'] = param_match.group(1)
+        
+        # Parse context length
+        ctx_match = re.search(r'context length\s+(\d+)', output)
+        if ctx_match:
+            details['context_length'] = int(ctx_match.group(1))
+        
+        # Parse quantization
+        quant_match = re.search(r'quantization\s+(\w+)', output)
+        if quant_match:
+            details['quantization'] = quant_match.group(1)
+        
+        # Parse temperature
+        temp_match = re.search(r'temperature\s+([\d.]+)', output)
+        if temp_match:
+            details['temperature'] = float(temp_match.group(1))
+        
+        # Parse top_p
+        top_p_match = re.search(r'top_p\s+([\d.]+)', output)
+        if top_p_match:
+            details['top_p'] = float(top_p_match.group(1))
+        
+        # Parse system prompt
+        system_match = re.search(r'System\s*\n(.+?)(?:\n\s*\n|\n\s*License|\n\s*Parameters)', output, re.DOTALL)
+        if system_match:
+            details['system_prompt'] = system_match.group(1).strip()
+        
+        # Parse license
+        license_match = re.search(r'License\s*\n(.+?)(?:\n\s*\n|\Z)', output, re.DOTALL)
+        if license_match:
+            details['license'] = license_match.group(1).strip().split('\n')[0]
+        
+        # Add specialized capabilities from system prompt
+        if details['system_prompt']:
+            specialized_caps = extract_capabilities_from_prompt(details['system_prompt'])
+            details['capabilities'].extend(specialized_caps)
+        
+        # Add architecture-based capabilities
+        arch_caps = get_architecture_capabilities(details['architecture'])
+        details['capabilities'].extend(arch_caps)
+        
+        # Remove duplicates and ensure we have at least one capability
+        details['capabilities'] = list(set(details['capabilities']))
+        if not details['capabilities']:
+            details['capabilities'] = ['General Purpose']
+        
+        return details
+        
+    except Exception as e:
+        print(f"Error getting model details for {model_name}: {e}")
+        return get_fallback_model_details(model_name)
+
+def get_fallback_model_details(model_name):
+    """Fallback model details when ollama show fails"""
+    capabilities = []
+    
+    # Basic pattern matching as fallback
+    if any(keyword in model_name.lower() for keyword in ['code', 'coder', 'codellama']):
+        capabilities.extend(['Coding', 'Code Generation', 'Debugging'])
+    if any(keyword in model_name.lower() for keyword in ['llama', 'qwen', 'mistral']):
+        capabilities.extend(['Reasoning', 'Planning'])
+    if any(keyword in model_name.lower() for keyword in ['llava', 'vision']):
+        capabilities.extend(['Visual Analysis'])
+    if any(keyword in model_name.lower() for keyword in ['chat', 'instruct']):
+        capabilities.extend(['Conversation', 'Instructions'])
+    
+    if not capabilities:
+        capabilities = ['General Purpose']
+    
+    return {
+        'capabilities': capabilities,
+        'architecture': 'Unknown',
+        'parameters': 'Unknown',
+        'context_length': 'Unknown',
+        'quantization': 'Unknown',
+        'temperature': 0.7,
+        'top_p': 0.9,
+        'system_prompt': '',
+        'license': 'Unknown'
+    }
+
+def extract_capabilities_from_prompt(system_prompt):
+    """Extract specialized capabilities from system prompt"""
+    capabilities = []
+    prompt_lower = system_prompt.lower()
+    
+    # Common capability keywords
+    capability_keywords = {
+        'debugging': 'Debugging',
+        'code analysis': 'Code Analysis',
+        'programming': 'Programming',
+        'mathematics': 'Mathematics',
+        'reasoning': 'Reasoning',
+        'planning': 'Planning',
+        'conversation': 'Conversation',
+        'instruction': 'Instruction Following',
+        'creative': 'Creative Writing',
+        'analysis': 'Analysis',
+        'problem solving': 'Problem Solving',
+        'devops': 'DevOps',
+        'kubernetes': 'Kubernetes',
+        'docker': 'Docker',
+        'ci/cd': 'CI/CD'
+    }
+    
+    for keyword, capability in capability_keywords.items():
+        if keyword in prompt_lower:
+            capabilities.append(capability)
+    
+    return capabilities
+
+def get_architecture_capabilities(architecture):
+    """Get capabilities based on model architecture"""
+    arch_capabilities = {
+        'llama': ['Reasoning', 'Planning'],
+        'mistral': ['Reasoning', 'Efficiency'],
+        'qwen': ['Multilingual', 'Reasoning'],
+        'phi': ['Efficiency', 'Reasoning'],
+        'gemma': ['Efficiency', 'Reasoning']
+    }
+    
+    return arch_capabilities.get(architecture.lower(), [])
+
+def sanitize_model_name(job_name, version=''):
+    """Convert job name to valid Ollama model name with version"""
     # Remove special characters and convert to lowercase
     sanitized = re.sub(r'[^a-zA-Z0-9\s-]', '', job_name)
     # Replace spaces with hyphens
@@ -192,9 +353,15 @@ def sanitize_model_name(job_name):
     sanitized = re.sub(r'-+', '-', sanitized)
     # Remove leading/trailing hyphens
     sanitized = sanitized.strip('-')
-    # Add :latest tag if not present
-    if not sanitized.endswith(':latest'):
+    
+    # Add version if provided, otherwise add :latest
+    if version and version.strip():
+        version_clean = re.sub(r'[^a-zA-Z0-9\-_.]', '-', version.strip())
+        version_clean = version_clean.lower()
+        sanitized += f':{version_clean}'
+    else:
         sanitized += ':latest'
+    
     return sanitized
 
 @app.route('/api/training-jobs', methods=['GET'])
@@ -232,18 +399,21 @@ def create_training_job():
                 'error': 'Base model is required'
             }), 400
         
-        # Generate model name from job name
-        model_name = sanitize_model_name(data['jobName'])
+        # Generate model name from job name and version
+        model_name = sanitize_model_name(data['jobName'], data.get('version', ''))
         
         # Prepare job data
         job_data = {
             'name': data['jobName'],
             'description': data.get('description', ''),
-            'job_type': data.get('jobType', 'experimental'),
+            'custom_capabilities': data.get('customCapabilities', []),
             'maker': data.get('maker', ''),
             'version': data.get('version', ''),
             'base_model': data['baseModel'],
             'training_type': data.get('training_type', data.get('type', 'lora')),
+            'temperature': data.get('temperature', 0.7),
+            'top_p': data.get('top_p', 0.9),
+            'context_length': data.get('context_length', 4096),
             'status': 'PENDING',
             'progress': 0.0,
             'config': json.dumps(data),
@@ -594,6 +764,10 @@ def update_evaluation(eval_id):
             updates['improvement'] = data['improvement']
         if 'notes' in data:
             updates['notes'] = data['notes']
+        if 'model_name' in data:
+            updates['model_name'] = data['model_name']
+        if 'status' in data:
+            updates['status'] = data['status']
         
         # Update in database
         success = db.update_evaluation(eval_id, updates)
@@ -662,7 +836,7 @@ def delete_evaluation(eval_id):
 
 @app.route('/api/models', methods=['GET'])
 def get_ollama_models():
-    """Get available Ollama models"""
+    """Get available Ollama models with detailed capabilities"""
     try:
         # Try to get models from Ollama
         result = subprocess.run(['ollama', 'list'], capture_output=True, text=True, timeout=10)
@@ -688,27 +862,22 @@ def get_ollama_models():
                     size = parts[1] if parts[1] != 'latest' else parts[2] if len(parts) > 2 else 'Unknown'
                     modified = ' '.join(parts[2:]) if len(parts) > 2 else 'Unknown'
                     
-                    # Determine model capabilities based on name
-                    capabilities = []
-                    if any(keyword in model_name.lower() for keyword in ['code', 'coder', 'codellama']):
-                        capabilities.extend(['Coding', 'Code Generation', 'Debugging'])
-                    if any(keyword in model_name.lower() for keyword in ['llama', 'qwen', 'mistral']):
-                        capabilities.extend(['Reasoning', 'Planning'])
-                    if any(keyword in model_name.lower() for keyword in ['llava', 'vision']):
-                        capabilities.extend(['Visual Analysis'])
-                    if any(keyword in model_name.lower() for keyword in ['chat', 'instruct']):
-                        capabilities.extend(['Conversation', 'Instructions'])
-                    
-                    # Remove duplicates and add default if empty
-                    capabilities = list(set(capabilities))
-                    if not capabilities:
-                        capabilities = ['General Purpose']
+                    # Get detailed model information from ollama show
+                    model_details = get_model_details_from_ollama(model_name)
                     
                     models.append({
                         'name': model_name,
                         'size': size,
                         'modified': modified,
-                        'capabilities': capabilities,
+                        'capabilities': model_details['capabilities'],
+                        'architecture': model_details['architecture'],
+                        'parameters': model_details['parameters'],
+                        'context_length': model_details['context_length'],
+                        'quantization': model_details['quantization'],
+                        'temperature': model_details['temperature'],
+                        'top_p': model_details['top_p'],
+                        'system_prompt': model_details['system_prompt'],
+                        'license': model_details['license'],
                         'type': 'ollama'
                     })
         
@@ -728,6 +897,94 @@ def get_ollama_models():
             'success': False,
             'error': 'Ollama not installed'
         }), 404
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/models/<path:model_name>', methods=['PUT'])
+def update_model(model_name):
+    """Update an Ollama model's system prompt and parameters"""
+    try:
+        data = request.get_json()
+        system_prompt = data.get('system_prompt', '')
+        temperature = data.get('temperature')
+        top_p = data.get('top_p')
+        description = data.get('description', '')
+        
+        if not system_prompt:
+            return jsonify({
+                'success': False,
+                'error': 'System prompt is required'
+            }), 400
+        
+        # Get the base model from the current model
+        result = subprocess.run(['ollama', 'show', model_name], capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return jsonify({
+                'success': False,
+                'error': f'Model {model_name} not found'
+            }), 404
+        
+        # Extract base model from the output (look for FROM line)
+        base_model = None
+        for line in result.stdout.split('\n'):
+            if line.strip().startswith('FROM '):
+                base_model = line.strip().split('FROM ')[1].strip()
+                break
+        
+        if not base_model:
+            # Fallback: try to determine base model from model name
+            if ':' in model_name:
+                base_model = model_name.split(':')[0] + ':latest'
+            else:
+                base_model = 'llama3.1:latest'  # Default fallback
+        
+        # Create a new Modelfile with updated system prompt
+        modelfile_content = f"""FROM {base_model}
+
+SYSTEM "{system_prompt}"
+
+# Parameters"""
+        
+        if temperature is not None:
+            modelfile_content += f"\nPARAMETER temperature {temperature}"
+        if top_p is not None:
+            modelfile_content += f"\nPARAMETER top_p {top_p}"
+        
+        # Create temporary Modelfile
+        import tempfile
+        import os
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.Modelfile', delete=False) as f:
+            f.write(modelfile_content)
+            temp_modelfile = f.name
+        
+        try:
+            # Update the model using ollama create (this overwrites the existing model)
+            result = subprocess.run(['ollama', 'create', model_name, '-f', temp_modelfile], 
+                                  capture_output=True, text=True, timeout=30)
+            
+            if result.returncode == 0:
+                return jsonify({
+                    'success': True,
+                    'message': f'Model {model_name} updated successfully',
+                    'system_prompt': system_prompt,
+                    'temperature': temperature,
+                    'top_p': top_p,
+                    'base_model': base_model
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': f'Failed to update model: {result.stderr}'
+                }), 500
+                
+        finally:
+            # Clean up temporary file
+            if os.path.exists(temp_modelfile):
+                os.unlink(temp_modelfile)
+                
     except Exception as e:
         return jsonify({
             'success': False,

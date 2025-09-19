@@ -27,11 +27,18 @@
         <span class="material-icons-round">search</span>
       </div>
       <div class="action-buttons">
-        <select class="form-control" v-model="selectedType">
-          <option value="">All Types</option>
-          <option v-for="type in modelTypes" :key="type" :value="type">
-            {{ type }}
+        <select class="form-control" v-model="selectedCapability">
+          <option value="">All Capabilities</option>
+          <option v-for="capability in availableCapabilities" :key="capability" :value="capability">
+            {{ capability }}
           </option>
+        </select>
+        <select class="form-control" v-model="sortBy">
+          <option value="ranking">Ranking</option>
+          <option value="name">Name (A-Z)</option>
+          <option value="size">Size</option>
+          <option value="parameters">Parameters</option>
+          <option value="context">Context Length</option>
         </select>
           <button class="btn btn-secondary" @click="fetchLocalModels" :disabled="isLoadingModels">
             <span class="material-icons-round">{{ isLoadingModels ? 'refresh' : 'refresh' }}</span>
@@ -156,25 +163,29 @@
         </div>
       </div>
 
-      <!-- Model Rankings -->
+      <!-- Model Rankings (Main Display) -->
       <div class="rankings-section">
         <div class="section-header">
           <h3>
             <span class="material-icons-round">emoji_events</span>
-            Model Rankings
+            AI Models
           </h3>
-          <p>Top performing models by parameters and capabilities</p>
+          <p>{{ filteredAndSortedModels.length }} models available</p>
         </div>
         
         <div class="rankings-grid">
           <div 
-            v-for="(model, index) in rankedModels.slice(0, 7)" 
+            v-for="(model, index) in filteredAndSortedModels" 
             :key="model.name"
-            class="ranking-card"
+            class="ranking-card clickable-card"
             :class="{ 'top-rank': index === 0 }"
+            @click="viewModelDetails(model)"
           >
             <div class="rank-number">
               <span class="rank-badge" :class="getRankClass(index)">{{ index + 1 }}</span>
+              <button class="chat-test-btn" @click.stop="openChatModal(model)" title="Test Model">
+                <span class="material-icons-round">chat</span>
+              </button>
             </div>
             <div class="model-info">
               <h4>{{ model.name }}</h4>
@@ -187,14 +198,31 @@
                   <span class="material-icons-round">speed</span>
                   {{ formatNumber(model.details?.context_length) }}
                 </span>
+                <span class="stat">
+                  <span class="material-icons-round">tune</span>
+                  {{ model.details?.quantization || 'N/A' }}
+                </span>
               </div>
               <div class="model-capabilities">
                 <span 
-                  v-for="capability in model.details?.capabilities?.slice(0, 3)" 
+                  v-for="capability in model.details?.capabilities?.slice(0, 4)" 
                   :key="capability"
                   class="capability-tag"
                 >
                   {{ capability }}
+                </span>
+                <span v-if="model.details?.capabilities?.length > 4" class="capability-more">
+                  +{{ model.details.capabilities.length - 4 }} more
+                </span>
+              </div>
+              <div class="model-params" v-if="model.details?.temperature || model.details?.top_p">
+                <span class="param">
+                  <span class="material-icons-round">thermostat</span>
+                  T: {{ model.details.temperature }}
+                </span>
+                <span class="param">
+                  <span class="material-icons-round">filter_alt</span>
+                  P: {{ model.details.top_p }}
                 </span>
               </div>
             </div>
@@ -206,9 +234,10 @@
         </div>
       </div>
 
-    <div class="models-grid">
+    <!-- Old models-grid section - keeping for reference but not displaying -->
+    <div class="models-grid" style="display: none;">
       <div 
-        v-for="model in filteredModels" 
+        v-for="model in filteredAndSortedModels" 
         :key="model.id" 
           class="model-card"
       >
@@ -222,7 +251,8 @@
               <p>{{ model.description || 'No description provided' }}</p>
             <div class="model-meta">
               <span>{{ model.trainingTime }}</span>
-              <span>{{ model.datasetSize }}</span>
+              <span>{{ model.details?.parameters || 'Unknown' }}</span>
+              <span>{{ model.details?.context_length || 'Unknown' }} ctx</span>
           </div>
           
             <!-- Job Details Section -->
@@ -265,7 +295,7 @@
       </div>
       
       <!-- Empty State -->
-      <div v-if="filteredModels.length === 0" class="empty-state">
+      <div v-if="filteredAndSortedModels.length === 0" class="empty-state">
         <div class="empty-icon">🤖</div>
         <h3>No models found</h3>
         <p>Get started by creating your first AI model or refreshing to load local models</p>
@@ -497,6 +527,201 @@
         </div>
       </div>
     </div>
+
+    <!-- Model Details Modal -->
+    <div v-if="showModelDetailsModal" class="modal-overlay" @click.self="showModelDetailsModal = false">
+      <div class="modal-content neumorphic-card model-details-modal">
+        <div class="modal-header">
+          <h2>Model Details: {{ selectedModelForDetails?.name }}</h2>
+          <div class="modal-actions">
+            <button class="btn btn-secondary" @click="toggleEditMode" v-if="!isEditingModel">
+              <span class="material-icons-round">edit</span>
+              Edit
+            </button>
+            <button class="btn btn-primary" @click="saveModelChanges" v-if="isEditingModel">
+              <span class="material-icons-round">save</span>
+              Save
+            </button>
+            <button class="btn btn-secondary" @click="cancelEditMode" v-if="isEditingModel">
+              <span class="material-icons-round">cancel</span>
+              Cancel
+            </button>
+            <button class="btn-icon" @click="showModelDetailsModal = false">✕</button>
+          </div>
+        </div>
+        
+        <div class="modal-body">
+          <div v-if="selectedModelForDetails" class="model-details-content">
+            <!-- Basic Information -->
+            <div class="detail-section">
+              <h4>Basic Information</h4>
+              <div class="detail-grid">
+                <div class="detail-item">
+                  <span class="label">Name:</span>
+                  <span class="value">{{ selectedModelForDetails.name }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">Type:</span>
+                  <span class="value">{{ selectedModelForDetails.type }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">Architecture:</span>
+                  <span class="value">{{ selectedModelForDetails.details?.architecture || 'Unknown' }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">Parameters:</span>
+                  <span class="value">{{ selectedModelForDetails.details?.parameters || 'Unknown' }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">Context Length:</span>
+                  <span class="value">{{ selectedModelForDetails.details?.context_length || 'Unknown' }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">Quantization:</span>
+                  <span class="value">{{ selectedModelForDetails.details?.quantization || 'Unknown' }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Configuration -->
+            <div class="detail-section">
+              <h4>Configuration</h4>
+              <div class="detail-grid">
+                <div class="detail-item">
+                  <span class="label">Temperature:</span>
+                  <span class="value">{{ selectedModelForDetails.details?.temperature || 'Unknown' }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">Top P:</span>
+                  <span class="value">{{ selectedModelForDetails.details?.top_p || 'Unknown' }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">License:</span>
+                  <span class="value">{{ selectedModelForDetails.details?.license || 'Unknown' }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">Size:</span>
+                  <span class="value">{{ selectedModelForDetails.trainingTime || 'Unknown' }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Capabilities -->
+            <div class="detail-section">
+              <h4>Capabilities</h4>
+              <div class="capabilities-grid">
+                <span 
+                  v-for="capability in selectedModelForDetails.details?.capabilities" 
+                  :key="capability"
+                  class="capability-tag large"
+                >
+                  {{ capability }}
+                </span>
+              </div>
+            </div>
+
+            <!-- System Prompt -->
+            <div v-if="selectedModelForDetails.details?.system_prompt" class="detail-section">
+              <h4>System Prompt</h4>
+              <div class="system-prompt" v-if="!isEditingModel">
+                <p>{{ selectedModelForDetails.details.system_prompt }}</p>
+              </div>
+              <div v-else class="editable-prompt">
+                <textarea 
+                  v-model="editableSystemPrompt"
+                  class="form-control prompt-textarea"
+                  rows="8"
+                  placeholder="Enter system prompt..."
+                ></textarea>
+                <div class="prompt-actions">
+                  <button class="btn btn-sm btn-secondary" @click="resetPrompt">
+                    <span class="material-icons-round">refresh</span>
+                    Reset
+                  </button>
+                  <span class="char-count">{{ editableSystemPrompt.length }} characters</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Description -->
+            <div class="detail-section">
+              <h4>Description</h4>
+              <div v-if="!isEditingModel">
+                <p>{{ selectedModelForDetails.description || 'No description provided' }}</p>
+              </div>
+              <div v-else class="editable-description">
+                <textarea 
+                  v-model="editableDescription"
+                  class="form-control"
+                  rows="3"
+                  placeholder="Enter model description..."
+                ></textarea>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="modal-footer">
+          <button class="btn btn-secondary" @click="showModelDetailsModal = false">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chat Test Modal -->
+    <div v-if="showChatModal" class="chat-modal-overlay" @click.self="closeChatModal">
+      <div class="chat-modal-content">
+        <div class="chat-header">
+          <div class="chat-model-info">
+            <span class="material-icons-round">smart_toy</span>
+            <h3>{{ selectedChatModel?.name }}</h3>
+            <span class="model-type">{{ selectedChatModel?.type }}</span>
+          </div>
+          <button class="btn-icon" @click="closeChatModal">✕</button>
+        </div>
+        
+        <div class="chat-terminal">
+          <div class="terminal-header">
+            <div class="terminal-controls">
+              <span class="control-dot red"></span>
+              <span class="control-dot yellow"></span>
+              <span class="control-dot green"></span>
+            </div>
+            <span class="terminal-title">Model Test Terminal</span>
+          </div>
+          
+          <div class="terminal-body" ref="terminalBody">
+            <div class="terminal-output">
+              <div v-for="(message, index) in chatMessages" :key="index" class="message" :class="message.type">
+                <span class="message-prefix">{{ message.prefix }}</span>
+                <span class="message-content">{{ message.content }}</span>
+              </div>
+              <div v-if="isGenerating" class="message generating">
+                <span class="message-prefix">{{ selectedChatModel?.name }}:</span>
+                <span class="message-content typing-indicator">
+                  <span class="typing-dot"></span>
+                  <span class="typing-dot"></span>
+                  <span class="typing-dot"></span>
+                </span>
+              </div>
+            </div>
+          </div>
+          
+          <div class="terminal-input">
+            <div class="input-line">
+              <span class="prompt-symbol">$</span>
+              <input 
+                v-model="chatInput" 
+                @keyup.enter="sendMessage"
+                :disabled="isGenerating"
+                placeholder="Type your message..."
+                class="terminal-input-field"
+                ref="chatInput"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -507,12 +732,25 @@ export default {
     return {
       searchQuery: '',
       selectedType: '',
-      sortBy: 'name',
+      selectedCapability: '',
+      sortBy: 'ranking',
       activeDropdown: null,
       showCreateModelModal: false,
       showDeleteModal: false,
       showDeployModal: false,
       showTestModal: false,
+      showModelDetailsModal: false,
+      selectedModelForDetails: null,
+      isEditingModel: false,
+      editableSystemPrompt: '',
+      editableDescription: '',
+      originalSystemPrompt: '',
+      originalDescription: '',
+      showChatModal: false,
+      selectedChatModel: null,
+      chatMessages: [],
+      chatInput: '',
+      isGenerating: false,
       editingModel: null,
       modelToDelete: null,
       selectedModel: null,
@@ -669,7 +907,20 @@ export default {
         };
       });
     },
-    filteredModels() {
+    availableCapabilities() {
+      const capabilities = new Set();
+      this.models.forEach(model => {
+        if (model.details?.capabilities) {
+          model.details.capabilities.forEach(cap => capabilities.add(cap));
+        }
+      });
+      return Array.from(capabilities).sort();
+    },
+    
+    filteredAndSortedModels() {
+      if (!this.models || !Array.isArray(this.models)) {
+        return [];
+      }
       let filtered = [...this.models];
       
       // Filter by search query
@@ -682,19 +933,31 @@ export default {
         );
       }
       
-      // Filter by type
-      if (this.selectedType) {
-        filtered = filtered.filter(model => model.type === this.selectedType);
+      // Filter by capability
+      if (this.selectedCapability) {
+        filtered = filtered.filter(model => 
+          model.details?.capabilities?.includes(this.selectedCapability)
+        );
       }
       
       // Sort models
       return filtered.sort((a, b) => {
-        if (this.sortBy === 'name') {
+        if (this.sortBy === 'ranking') {
+          return this.calculateModelScore(b) - this.calculateModelScore(a);
+        } else if (this.sortBy === 'name') {
           return a.name.localeCompare(b.name);
-        } else if (this.sortBy === 'date') {
-          return new Date(b.updatedAt) - new Date(a.updatedAt);
-        } else if (this.sortBy === 'accuracy') {
-          return b.accuracy - a.accuracy;
+        } else if (this.sortBy === 'size') {
+          const aSize = this.parseModelSize(a.trainingTime);
+          const bSize = this.parseModelSize(b.trainingTime);
+          return bSize - aSize;
+        } else if (this.sortBy === 'parameters') {
+          const aParams = this.parseParameters(a.details?.parameters);
+          const bParams = this.parseParameters(b.details?.parameters);
+          return bParams - aParams;
+        } else if (this.sortBy === 'context') {
+          const aCtx = parseInt(a.details?.context_length) || 0;
+          const bCtx = parseInt(b.details?.context_length) || 0;
+          return bCtx - aCtx;
         }
         return 0;
       });
@@ -856,8 +1119,202 @@ export default {
     },
     
     viewModelDetails(model) {
-      // In a real app, this would navigate to a detailed view
-      console.log('Viewing model:', model.name);
+      this.selectedModelForDetails = model;
+      this.showModelDetailsModal = true;
+      this.isEditingModel = false;
+      // Initialize editable values
+      this.editableSystemPrompt = model.details?.system_prompt || '';
+      this.editableDescription = model.description || '';
+      this.originalSystemPrompt = model.details?.system_prompt || '';
+      this.originalDescription = model.description || '';
+      console.log('Viewing model details:', model);
+    },
+    
+    toggleEditMode() {
+      this.isEditingModel = true;
+    },
+    
+    cancelEditMode() {
+      this.isEditingModel = false;
+      // Reset to original values
+      this.editableSystemPrompt = this.originalSystemPrompt;
+      this.editableDescription = this.originalDescription;
+    },
+    
+    resetPrompt() {
+      this.editableSystemPrompt = this.originalSystemPrompt;
+    },
+    
+    async saveModelChanges() {
+      try {
+        // Show loading state
+        const saveButton = document.querySelector('.btn-primary');
+        if (saveButton) {
+          saveButton.disabled = true;
+          saveButton.innerHTML = '<span class="material-icons-round">refresh</span> Saving...';
+        }
+        
+        // Prepare data for API call
+        const updateData = {
+          system_prompt: this.editableSystemPrompt,
+          temperature: this.selectedModelForDetails.details?.temperature,
+          top_p: this.selectedModelForDetails.details?.top_p,
+          description: this.editableDescription
+        };
+        
+        // Call backend API to update the model
+        const response = await fetch(`http://localhost:5000/api/models/${encodeURIComponent(this.selectedModelForDetails.name)}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(updateData)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+          // Update the model in the local array
+          const modelIndex = this.models.findIndex(m => m.name === this.selectedModelForDetails.name);
+          if (modelIndex !== -1) {
+            // Update local model data
+            this.models[modelIndex].description = this.editableDescription;
+            if (this.models[modelIndex].details) {
+              this.models[modelIndex].details.system_prompt = this.editableSystemPrompt;
+            }
+            
+            // Update the selected model for display
+            this.selectedModelForDetails.description = this.editableDescription;
+            if (this.selectedModelForDetails.details) {
+              this.selectedModelForDetails.details.system_prompt = this.editableSystemPrompt;
+            }
+            
+            // Update original values
+            this.originalSystemPrompt = this.editableSystemPrompt;
+            this.originalDescription = this.editableDescription;
+            
+            this.isEditingModel = false;
+            
+            // Show success message
+            console.log('Model changes saved successfully:', result.message);
+            
+            // Refresh the models list to get updated data
+            await this.fetchLocalModels();
+            
+          } else {
+            console.error('Model not found in local array');
+          }
+        } else {
+          throw new Error(result.error || 'Failed to save model changes');
+        }
+        
+      } catch (error) {
+        console.error('Error saving model changes:', error);
+        alert(`Failed to save changes: ${error.message}`);
+      } finally {
+        // Reset button state
+        const saveButton = document.querySelector('.btn-primary');
+        if (saveButton) {
+          saveButton.disabled = false;
+          saveButton.innerHTML = '<span class="material-icons-round">save</span> Save';
+        }
+      }
+    },
+    
+    openChatModal(model) {
+      this.selectedChatModel = model;
+      this.showChatModal = true;
+      this.chatMessages = [];
+      this.chatInput = '';
+      this.isGenerating = false;
+      
+      // Add welcome message
+      this.chatMessages.push({
+        type: 'system',
+        prefix: 'System:',
+        content: `Connected to ${model.name}. Type your message and press Enter to test the model.`
+      });
+      
+      // Focus input after modal opens
+      this.$nextTick(() => {
+        if (this.$refs.chatInput) {
+          this.$refs.chatInput.focus();
+        }
+      });
+    },
+    
+    closeChatModal() {
+      this.showChatModal = false;
+      this.selectedChatModel = null;
+      this.chatMessages = [];
+      this.chatInput = '';
+      this.isGenerating = false;
+    },
+    
+    async sendMessage() {
+      if (!this.chatInput.trim() || this.isGenerating) return;
+      
+      const userMessage = this.chatInput.trim();
+      this.chatInput = '';
+      
+      // Add user message
+      this.chatMessages.push({
+        type: 'user',
+        prefix: 'You:',
+        content: userMessage
+      });
+      
+      this.isGenerating = true;
+      this.scrollToBottom();
+      
+      try {
+        // Call Ollama API to generate response
+        const response = await fetch('http://localhost:11434/api/generate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: this.selectedChatModel.name,
+            prompt: userMessage,
+            stream: false
+          })
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          const aiResponse = data.response || 'No response generated';
+          
+          // Add AI response
+          this.chatMessages.push({
+            type: 'ai',
+            prefix: `${this.selectedChatModel.name}:`,
+            content: aiResponse
+          });
+        } else {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+      } catch (error) {
+        console.error('Error calling Ollama API:', error);
+        this.chatMessages.push({
+          type: 'error',
+          prefix: 'Error:',
+          content: `Failed to get response: ${error.message}`
+        });
+      } finally {
+        this.isGenerating = false;
+        this.scrollToBottom();
+      }
+    },
+    
+    scrollToBottom() {
+      this.$nextTick(() => {
+        const terminalBody = this.$refs.terminalBody;
+        if (terminalBody) {
+          terminalBody.scrollTop = terminalBody.scrollHeight;
+        }
+      });
     },
     
     toggleModelFavorite(model) {
@@ -1080,12 +1537,24 @@ export default {
             type: this.getModelType(model.name),
             description: this.getModelDescription(model.name),
             accuracy: this.getModelAccuracy(model.name),
-            trainingTime: this.formatModelSize(model.size),
-            datasetSize: this.getModelSize(model.size),
-              updatedAt: this.parseModelDate(model.modified),
+            trainingTime: this.formatModelSize(model.modified),
+            datasetSize: this.getModelSize(model.modified),
+            updatedAt: this.parseModelDate(model.modified),
             tags: this.getModelTags(model.name),
             isFavorite: this.isFavoriteModel(model.name),
             capabilities: model.capabilities || [],
+            // Enhanced model details from ollama show
+            details: {
+              capabilities: model.capabilities || [],
+              architecture: model.architecture || 'Unknown',
+              parameters: model.parameters || 'Unknown',
+              context_length: model.context_length || 'Unknown',
+              quantization: model.quantization || 'Unknown',
+              temperature: model.temperature || 0.7,
+              top_p: model.top_p || 0.9,
+              system_prompt: model.system_prompt || '',
+              license: model.license || 'Unknown'
+            },
             ollamaModel: model // Keep original backend data
           }));
         } else {
@@ -1164,16 +1633,24 @@ export default {
       return 85.0;
     },
     
-    formatModelSize(size) {
-      if (!size) return 'Unknown';
-      const gb = size / (1024 * 1024 * 1024);
-      return `${gb.toFixed(1)} GB`;
+    formatModelSize(modified) {
+      if (!modified) return 'Unknown';
+      // Extract size from modified field like "7.4 GB 49 minutes ago"
+      const sizeMatch = modified.match(/(\d+\.?\d*)\s*GB/);
+      if (sizeMatch) {
+        return `${sizeMatch[1]} GB`;
+      }
+      return 'Unknown';
     },
     
-    getModelSize(size) {
-      if (!size) return 'Unknown';
-      const gb = size / (1024 * 1024 * 1024);
-      return `${gb.toFixed(1)}GB`;
+    getModelSize(modified) {
+      if (!modified) return 'Unknown';
+      // Extract size from modified field like "7.4 GB 49 minutes ago"
+      const sizeMatch = modified.match(/(\d+\.?\d*)\s*GB/);
+      if (sizeMatch) {
+        return `${sizeMatch[1]}GB`;
+      }
+      return 'Unknown';
     },
     
     getModelTags(name) {
@@ -1198,6 +1675,18 @@ export default {
     isFavoriteModel(name) {
       // Mark Agimat as favorite by default
       return name.toLowerCase().includes('agimat');
+    },
+    
+    parseModelSize(sizeString) {
+      if (!sizeString) return 0;
+      const match = sizeString.match(/(\d+\.?\d*)\s*GB/);
+      return match ? parseFloat(match[1]) : 0;
+    },
+    
+    parseParameters(paramString) {
+      if (!paramString) return 0;
+      const match = paramString.match(/(\d+\.?\d*)\s*B/);
+      return match ? parseFloat(match[1]) : 0;
     },
     
     parseModelDate(dateString) {
@@ -1715,6 +2204,403 @@ export default {
   font-weight: 500;
 }
 
+/* Model Details Modal */
+.model-details-modal {
+  max-width: 700px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.model-details-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.detail-section h4 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #333;
+  margin: 0 0 1rem 0;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #eee;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.detail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.detail-item .label {
+  font-size: 0.85rem;
+  color: #666;
+  font-weight: 500;
+}
+
+.detail-item .value {
+  font-size: 0.95rem;
+  color: #333;
+  font-weight: 600;
+}
+
+.capabilities-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.capability-tag.large {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  background: #e3f2fd;
+  color: #1976d2;
+  border-radius: 12px;
+  font-weight: 500;
+}
+
+.system-prompt {
+  background: #f8f9fa;
+  padding: 1rem;
+  border-radius: 8px;
+  border-left: 4px solid #4e73df;
+}
+
+.system-prompt p {
+  margin: 0;
+  color: #333;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+/* Modal Actions */
+.modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Editable Prompt */
+.editable-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.prompt-textarea {
+  font-family: 'Courier New', monospace;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  resize: vertical;
+  min-height: 200px;
+  border: 2px solid #e9ecef;
+  border-radius: 8px;
+  padding: 1rem;
+  transition: border-color 0.3s ease;
+}
+
+.prompt-textarea:focus {
+  border-color: #4e73df;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(78, 115, 223, 0.1);
+}
+
+.prompt-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.char-count {
+  font-size: 0.8rem;
+  color: #666;
+  font-weight: 500;
+}
+
+/* Editable Description */
+.editable-description textarea {
+  resize: vertical;
+  min-height: 80px;
+  border: 2px solid #e9ecef;
+  border-radius: 8px;
+  padding: 0.75rem;
+  transition: border-color 0.3s ease;
+}
+
+.editable-description textarea:focus {
+  border-color: #4e73df;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(78, 115, 223, 0.1);
+}
+
+/* Edit Mode Styling */
+.detail-section.editing {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 1rem;
+  border: 1px solid #e9ecef;
+}
+
+/* Chat Test Button */
+.chat-test-btn {
+  position: absolute;
+  top: -84px;
+  left: -18px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #4e73df;
+  color: white;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(78, 115, 223, 0.3);
+  transition: all 0.3s ease;
+  z-index: 10;
+}
+
+.chat-test-btn:hover {
+  background: #3d5fc7;
+  transform: scale(1.1);
+  box-shadow: 0 4px 12px rgba(78, 115, 223, 0.4);
+}
+
+.chat-test-btn .material-icons-round {
+  font-size: 16px;
+}
+
+.rank-number {
+  position: relative;
+}
+
+/* Chat Modal */
+.chat-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.chat-modal-content {
+  width: 90%;
+  max-width: 800px;
+  height: 80vh;
+  background: #1e1e1e;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+}
+
+.chat-header {
+  background: #2d2d2d;
+  padding: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #404040;
+}
+
+.chat-model-info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.chat-model-info .material-icons-round {
+  color: #4e73df;
+}
+
+.chat-model-info h3 {
+  margin: 0;
+  color: #fff;
+  font-size: 1.1rem;
+}
+
+.model-type {
+  background: #4e73df;
+  color: white;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+/* Terminal Styling */
+.chat-terminal {
+  height: calc(100% - 80px);
+  display: flex;
+  flex-direction: column;
+}
+
+.terminal-header {
+  background: #333;
+  padding: 0.5rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  border-bottom: 1px solid #404040;
+}
+
+.terminal-controls {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.control-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+.control-dot.red { background: #ff5f56; }
+.control-dot.yellow { background: #ffbd2e; }
+.control-dot.green { background: #27ca3f; }
+
+.terminal-title {
+  color: #ccc;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.terminal-body {
+  flex: 1;
+  background: #1e1e1e;
+  padding: 1rem;
+  overflow-y: auto;
+  font-family: 'Courier New', monospace;
+}
+
+.terminal-output {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.message {
+  display: flex;
+  gap: 0.5rem;
+  line-height: 1.4;
+}
+
+.message-prefix {
+  color: #888;
+  font-weight: bold;
+  min-width: 120px;
+}
+
+.message-content {
+  color: #fff;
+  flex: 1;
+  white-space: pre-wrap;
+}
+
+.message.user .message-prefix {
+  color: #4e73df;
+}
+
+.message.ai .message-prefix {
+  color: #27ca3f;
+}
+
+.message.system .message-prefix {
+  color: #ffbd2e;
+}
+
+.message.error .message-prefix {
+  color: #ff5f56;
+}
+
+.message.error .message-content {
+  color: #ff5f56;
+}
+
+/* Typing Indicator */
+.typing-indicator {
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
+}
+
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  background: #4e73df;
+  border-radius: 50%;
+  animation: typing 1.4s infinite ease-in-out;
+}
+
+.typing-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.typing-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes typing {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.5;
+  }
+  30% {
+    transform: translateY(-10px);
+    opacity: 1;
+  }
+}
+
+/* Terminal Input */
+.terminal-input {
+  background: #2d2d2d;
+  padding: 1rem;
+  border-top: 1px solid #404040;
+}
+
+.input-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.prompt-symbol {
+  color: #4e73df;
+  font-weight: bold;
+  font-family: 'Courier New', monospace;
+}
+
+.terminal-input-field {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: #fff;
+  font-family: 'Courier New', monospace;
+  font-size: 1rem;
+  outline: none;
+}
+
+.terminal-input-field::placeholder {
+  color: #666;
+}
+
+.terminal-input-field:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .actions-bar {
@@ -1851,6 +2737,16 @@ export default {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
 }
 
+.clickable-card {
+  cursor: pointer;
+}
+
+.clickable-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  border-color: var(--primary, #4e73df);
+}
+
 .ranking-card.top-rank {
   border: 2px solid #ffd700;
   background: linear-gradient(135deg, #fff9e6, #ffffff);
@@ -1933,6 +2829,32 @@ export default {
   padding: 0.25rem 0.5rem;
   border-radius: 4px;
   font-size: 0.75rem;
+}
+
+.capability-more {
+  background: rgba(108, 117, 125, 0.1);
+  color: #6c757d;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+}
+
+.model-params {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.param {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: #6c757d;
+}
+
+.param .material-icons-round {
+  font-size: 14px;
 }
 
 .rank-score {

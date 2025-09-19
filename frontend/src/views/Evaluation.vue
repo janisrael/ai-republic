@@ -8,21 +8,7 @@
     </div>
 
     <!-- Summary Cards -->
-    <div class="summary-cards">
-      <div class="summary-card shadow-soft" v-for="(metric, key) in metrics" :key="key">
-        <div class="summary-icon" :class="key">
-          <span class="emoji">{{ metric.icon }}</span>
-        </div>
-        <div class="summary-details">
-          <h3>{{ metric.label }}</h3>
-          <p class="metric">{{ metric.value }}</p>
-          <p class="trend" :class="metric.trend > 0 ? 'positive' : 'negative'">
-            <span class="emoji">{{ metric.trend > 0 ? '📈' : '📉' }}</span>
-            {{ Math.abs(metric.trend) }}% {{ metric.trend > 0 ? 'increase' : 'decrease' }}
-          </p>
-        </div>
-      </div>
-    </div>
+    <EvaluationSummaryCards :metrics="metrics" :evaluations="evaluations" />
 
     <!-- Main Content -->
     <div class="evaluation-content">
@@ -84,9 +70,9 @@
                 <div class="metric-value">
                   {{ (evaluation.metrics?.accuracy || 0) }}%
                   <span class="metric-trend"
-                    :class="{ 'up': (evaluation.metrics?.accuracyChange || 0) > 0, 'down': (evaluation.metrics?.accuracyChange || 0) < 0 }">
-                    {{ (evaluation.metrics?.accuracyChange || 0) > 0 ? '↑' : '↓' }}
-                    {{ Math.abs((evaluation.metrics?.accuracyChange || 0)) }}%
+                    :class="{ 'up': getAccuracyChange(evaluation) > 0, 'down': getAccuracyChange(evaluation) < 0 }">
+                    {{ getAccuracyChange(evaluation) > 0 ? '↑' : '↓' }}
+                    {{ Math.abs(getAccuracyChange(evaluation)).toFixed(1) }}%
                   </span>
                 </div>
                 <div class="metric-bar">
@@ -97,7 +83,14 @@
 
               <div class="metric">
                 <div class="metric-label">Precision</div>
-                <div class="metric-value">{{ (evaluation.metrics?.precision || 0).toFixed(3) }}</div>
+                <div class="metric-value">
+                  {{ (evaluation.metrics?.precision || 0).toFixed(3) }}
+                  <span class="metric-trend"
+                    :class="{ 'up': getPrecisionChange(evaluation) > 0, 'down': getPrecisionChange(evaluation) < 0 }">
+                    {{ getPrecisionChange(evaluation) > 0 ? '↑' : '↓' }}
+                    {{ Math.abs(getPrecisionChange(evaluation)).toFixed(1) }}%
+                  </span>
+                </div>
                 <div class="metric-bar">
                   <div class="metric-bar-fill" :style="{ width: ((evaluation.metrics?.precision || 0) * 100) + '%' }"
                     :class="getMetricClass((evaluation.metrics?.precision || 0))"></div>
@@ -106,7 +99,14 @@
 
               <div class="metric">
                 <div class="metric-label">Recall</div>
-                <div class="metric-value">{{ (evaluation.metrics?.recall || 0).toFixed(3) }}</div>
+                <div class="metric-value">
+                  {{ (evaluation.metrics?.recall || 0).toFixed(3) }}
+                  <span class="metric-trend"
+                    :class="{ 'up': getRecallChange(evaluation) > 0, 'down': getRecallChange(evaluation) < 0 }">
+                    {{ getRecallChange(evaluation) > 0 ? '↑' : '↓' }}
+                    {{ Math.abs(getRecallChange(evaluation)).toFixed(1) }}%
+                  </span>
+                </div>
                 <div class="metric-bar">
                   <div class="metric-bar-fill" :style="{ width: ((evaluation.metrics?.recall || 0) * 100) + '%' }"
                     :class="getMetricClass((evaluation.metrics?.recall || 0))"></div>
@@ -115,7 +115,14 @@
 
               <div class="metric">
                 <div class="metric-label">F1 Score</div>
-                <div class="metric-value">{{ (evaluation.metrics?.f1 || 0).toFixed(3) }}</div>
+                <div class="metric-value">
+                  {{ (evaluation.metrics?.f1 || 0).toFixed(3) }}
+                  <span class="metric-trend"
+                    :class="{ 'up': getF1Change(evaluation) > 0, 'down': getF1Change(evaluation) < 0 }">
+                    {{ getF1Change(evaluation) > 0 ? '↑' : '↓' }}
+                    {{ Math.abs(getF1Change(evaluation)).toFixed(1) }}%
+                  </span>
+                </div>
                 <div class="metric-bar">
                   <div class="metric-bar-fill" :style="{ width: ((evaluation.metrics?.f1 || 0) * 100) + '%' }"
                     :class="getMetricClass((evaluation.metrics?.f1 || 0))"></div>
@@ -389,42 +396,63 @@
 
           <!-- Training Results Comparison History Accordion -->
 
-          <!-- Performance Graphs -->
-          <div class="performance-graphs">
-            <h5>Performance Metrics Over Time</h5>
-            <div class="graphs-grid">
-              <div class="graph-container">
-                <canvas ref="accuracyChart" width="400" height="200"></canvas>
-                <p class="graph-title">Accuracy Trend</p>
+          <!-- Real Evaluation Data -->
+          <div class="real-evaluation-data">
+            <h5>Evaluation Results</h5>
+            <div class="evaluation-details-grid">
+              <div class="detail-card">
+                <h6>Training Information</h6>
+                <div class="detail-item">
+                  <span class="label">Training Type:</span>
+                  <span class="value">{{ selectedEvaluation.trainingType }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">Base Model:</span>
+                  <span class="value">{{ selectedEvaluation.baseModel }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">Dataset:</span>
+                  <span class="value">{{ selectedEvaluation.datasetName }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">Dataset Size:</span>
+                  <span class="value">{{ selectedEvaluation.datasetSize }}</span>
+                </div>
               </div>
-              <div class="graph-container">
-                <canvas ref="lossChart" width="400" height="200"></canvas>
-                <p class="graph-title">Loss Trend</p>
+
+              <div class="detail-card">
+                <h6>Performance Improvement</h6>
+                <div class="detail-item">
+                  <span class="label">Overall Improvement:</span>
+                  <span class="value improvement" :class="{ 'positive': selectedEvaluation.accuracyChange > 0, 'negative': selectedEvaluation.accuracyChange < 0 }">
+                    {{ selectedEvaluation.accuracyChange > 0 ? '+' : '' }}{{ selectedEvaluation.accuracyChange.toFixed(1) }}%
+                  </span>
+                </div>
+                <div class="detail-item">
+                  <span class="label">Status:</span>
+                  <span class="value status" :class="selectedEvaluation.evaluationStatus.toLowerCase()">
+                    {{ selectedEvaluation.evaluationStatus }}
+                  </span>
+                </div>
+                <div class="detail-item" v-if="selectedEvaluation.notes">
+                  <span class="label">Notes:</span>
+                  <span class="value">{{ selectedEvaluation.notes }}</span>
+                </div>
               </div>
             </div>
           </div>
 
-          <!-- Fitness/Overfitting Visualization -->
-          <div class="fitness-visualization">
-            <h5>Model Fitness Analysis</h5>
-            <div class="fitness-charts">
-              <div class="chart-container">
-                <canvas ref="fitnessChart" width="500" height="300"></canvas>
-                <p class="chart-title">Training vs Validation Performance</p>
-                <div class="fitness-legend">
-                  <div class="legend-item">
-                    <span class="legend-dot training"></span>
-                    <span>Training</span>
-                  </div>
-                  <div class="legend-item">
-                    <span class="legend-dot validation"></span>
-                    <span>Validation</span>
-                  </div>
-                  <div class="legend-item">
-                    <span class="legend-dot overfitting"></span>
-                    <span>Overfitting Zone</span>
-                  </div>
-                </div>
+          <!-- Real Performance Charts -->
+          <div class="performance-graphs">
+            <h5>Performance Analysis</h5>
+            <div class="graphs-grid">
+              <div class="graph-container">
+                <canvas ref="lossChart" width="400" height="200"></canvas>
+                <p class="graph-title">Performance Improvement</p>
+              </div>
+              <div class="graph-container">
+                <canvas ref="fitnessChart" width="400" height="200"></canvas>
+                <p class="graph-title">Before vs After Comparison</p>
               </div>
             </div>
           </div>
@@ -567,6 +595,8 @@
 </template>
 
 <script>
+import EvaluationSummaryCards from '@/components/EvaluationSummaryCards.vue';
+
 export default {
   name: 'EvaluationView',
   data() {
@@ -611,6 +641,9 @@ export default {
       evaluations: [],
       datasets: []
     };
+  },
+  components: {
+    EvaluationSummaryCards
   },
   async mounted() {
     await this.fetchDatasets();
@@ -821,11 +854,17 @@ export default {
         const evaluationsResponse = await fetch('http://localhost:5000/api/evaluations');
         const evaluationsResult = await evaluationsResponse.json();
         
-        // Create evaluation lookup map
+        // Create evaluation lookup map with flexible matching
         const evaluationMap = {};
         if (evaluationsResult.success) {
           evaluationsResult.evaluations.forEach(evaluation => {
             evaluationMap[evaluation.model_name] = evaluation;
+            
+            // Also create mappings for base names (without version) for flexible matching
+            const baseName = evaluation.model_name.split(':')[0];
+            if (!evaluationMap[baseName]) {
+              evaluationMap[baseName] = evaluation;
+            }
           });
         }
         
@@ -836,7 +875,22 @@ export default {
         this.evaluations = jobsResult.jobs
           .filter(job => job.status === 'COMPLETED')
           .map(job => {
-            const evaluation = evaluationMap[job.model_name];
+            // Try multiple matching strategies for evaluation
+            let evaluation = evaluationMap[job.model_name];
+            
+            // If no exact match, try base name matching
+            if (!evaluation && job.model_name) {
+              const baseName = job.model_name.split(':')[0];
+              evaluation = evaluationMap[baseName];
+            }
+            
+            // If still no match, try finding any evaluation with similar name
+            if (!evaluation && job.model_name) {
+              const baseName = job.model_name.split(':')[0];
+              evaluation = evaluationsResult.evaluations.find(evaluationItem => 
+                evaluationItem.model_name.includes(baseName)
+              );
+            }
             const config = typeof job.config === 'string' ? JSON.parse(job.config) : job.config;
             
             const evaluationData = {
@@ -852,11 +906,23 @@ export default {
               isSelected: false,
               trainingType: job.training_type === 'rag' ? 'RAG Training' : 'LoRA Fine-tuning',
               baseModel: job.base_model || '',
-              metrics: evaluation ? evaluation.after_metrics || {} : {},
-              beforeMetrics: evaluation ? evaluation.before_metrics || {} : {},
+              metrics: evaluation ? {
+                accuracy: (evaluation.after_metrics?.accuracy || 0) * 100, // Convert to percentage
+                precision: evaluation.after_metrics?.precision || 0,
+                recall: evaluation.after_metrics?.recall || 0,
+                f1: evaluation.after_metrics?.f1 || 0,
+                inferenceTime: evaluation.after_metrics?.inferenceTime || 0
+              } : {},
+              beforeMetrics: evaluation ? {
+                accuracy: (evaluation.before_metrics?.accuracy || 0) * 100, // Convert to percentage
+                precision: evaluation.before_metrics?.precision || 0,
+                recall: evaluation.before_metrics?.recall || 0,
+                f1: evaluation.before_metrics?.f1 || 0,
+                inferenceTime: evaluation.before_metrics?.inferenceTime || 0
+              } : {},
               accuracyChange: evaluation ? evaluation.improvement || 0 : 0,
               notes: evaluation ? evaluation.notes || '' : `Training job: ${job.name} - ${job.description || 'No description'}`,
-              evaluationStatus: evaluation ? 'Evaluated' : 'Not Evaluated',
+              evaluationStatus: evaluation ? evaluation.status : 'Not Evaluated',
               hasEvaluation: !!evaluation
             };
             
@@ -930,6 +996,30 @@ export default {
       if (value >= 0.8) return 'good';
       if (value >= 0.7) return 'fair';
       return 'poor';
+    },
+    getPrecisionChange(evaluation) {
+      if (!evaluation.beforeMetrics?.precision || !evaluation.metrics?.precision) return 0;
+      const before = evaluation.beforeMetrics.precision;
+      const after = evaluation.metrics.precision;
+      return ((after - before) / before) * 100;
+    },
+    getRecallChange(evaluation) {
+      if (!evaluation.beforeMetrics?.recall || !evaluation.metrics?.recall) return 0;
+      const before = evaluation.beforeMetrics.recall;
+      const after = evaluation.metrics.recall;
+      return ((after - before) / before) * 100;
+    },
+    getF1Change(evaluation) {
+      if (!evaluation.beforeMetrics?.f1 || !evaluation.metrics?.f1) return 0;
+      const before = evaluation.beforeMetrics.f1;
+      const after = evaluation.metrics.f1;
+      return ((after - before) / before) * 100;
+    },
+    getAccuracyChange(evaluation) {
+      if (!evaluation.beforeMetrics?.accuracy || !evaluation.metrics?.accuracy) return 0;
+      const before = evaluation.beforeMetrics.accuracy;
+      const after = evaluation.metrics.accuracy;
+      return ((after - before) / before) * 100;
     },
     toggleFavorite(id) {
       const evaluation = this.evaluations.find(e => e.id === id);
@@ -1011,13 +1101,15 @@ export default {
       const data = this.generateLossData();
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.strokeStyle = '#e74a3b';
+      
+      // Draw performance improvement as error reduction
+      ctx.strokeStyle = '#2e7d32';
       ctx.lineWidth = 3;
       ctx.beginPath();
 
       data.forEach((point, index) => {
         const x = (index / (data.length - 1)) * (canvas.width - 40) + 20;
-        const y = 20 + (point / 1) * (canvas.height - 40);
+        const y = canvas.height - 20 - (point * (canvas.height - 40));
 
         if (index === 0) {
           ctx.moveTo(x, y);
@@ -1028,15 +1120,23 @@ export default {
 
       ctx.stroke();
 
-      // Draw points
-      ctx.fillStyle = '#e74a3b';
-      data.forEach((point, index) => {
-        const x = (index / (data.length - 1)) * (canvas.width - 40) + 20;
-        const y = 20 + (point / 1) * (canvas.height - 40);
-        ctx.beginPath();
-        ctx.arc(x, y, 4, 0, 2 * Math.PI);
-        ctx.fill();
-      });
+      // Add area fill
+      ctx.fillStyle = 'rgba(46, 125, 50, 0.1)';
+      ctx.lineTo(canvas.width - 20, canvas.height - 20);
+      ctx.lineTo(20, canvas.height - 20);
+      ctx.closePath();
+      ctx.fill();
+
+      // Add labels
+      ctx.fillStyle = '#666';
+      ctx.font = '12px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('Performance Improvement', canvas.width / 2, canvas.height - 5);
+      
+      // Add start/end labels
+      ctx.font = '10px Arial';
+      ctx.fillText('Before', 20, canvas.height - 8);
+      ctx.fillText('After', canvas.width - 20, canvas.height - 8);
     },
 
     createFitnessChart() {
@@ -1340,38 +1440,52 @@ export default {
     },
 
     generateLossData() {
-      // Generate realistic loss progression (decreasing)
-      const epochs = 20;
+      // Generate performance improvement visualization based on real data
+      const beforeAccuracy = this.selectedEvaluation.beforeMetrics?.accuracy || 0;
+      const afterAccuracy = this.selectedEvaluation.metrics?.accuracy || 0;
+      const improvement = afterAccuracy - beforeAccuracy;
+      
+      // Create a visual representation of the improvement journey
+      const steps = 10;
       const data = [];
-
-      for (let i = 0; i < epochs; i++) {
-        const progress = i / (epochs - 1);
-        const loss = 0.8 * Math.exp(-progress * 2) + 0.1 + (Math.random() - 0.5) * 0.05;
-        data.push(Math.max(0, loss));
+      
+      for (let i = 0; i < steps; i++) {
+        const progress = i / (steps - 1);
+        // Show improvement as a decreasing "loss" (error reduction)
+        const errorReduction = (1 - beforeAccuracy/100) * (1 - progress) + (1 - afterAccuracy/100) * progress;
+        data.push(errorReduction);
       }
 
       return data;
     },
 
     generateFitnessData() {
-      // Generate training vs validation data to show overfitting
-      const epochs = 15;
-      const training = [];
-      const validation = [];
+      // Generate before/after comparison visualization using real data
+      const beforeMetrics = this.selectedEvaluation.beforeMetrics;
+      const afterMetrics = this.selectedEvaluation.metrics;
+      
+      // Create comparison data for multiple metrics
+      const metrics = ['accuracy', 'precision', 'recall', 'f1'];
+      const beforeData = [];
+      const afterData = [];
+      
+      metrics.forEach(metric => {
+        const beforeValue = beforeMetrics?.[metric] || 0;
+        const afterValue = afterMetrics?.[metric] || 0;
+        
+        // Convert to percentage for accuracy, keep as decimal for others
+        const beforeDisplay = metric === 'accuracy' ? beforeValue : beforeValue * 100;
+        const afterDisplay = metric === 'accuracy' ? afterValue : afterValue * 100;
+        
+        beforeData.push(beforeDisplay);
+        afterData.push(afterDisplay);
+      });
 
-      for (let i = 0; i < epochs; i++) {
-        const progress = i / (epochs - 1);
-
-        // Training accuracy keeps improving
-        const trainAcc = 70 + progress * 25 + (Math.random() - 0.5) * 2;
-        training.push(Math.max(0, Math.min(100, trainAcc)));
-
-        // Validation accuracy plateaus and may decrease (overfitting)
-        const valAcc = 70 + progress * 20 - (progress > 0.7 ? (progress - 0.7) * 10 : 0) + (Math.random() - 0.5) * 2;
-        validation.push(Math.max(0, Math.min(100, valAcc)));
-      }
-
-      return { training, validation };
+      return { 
+        training: beforeData, 
+        validation: afterData,
+        labels: ['Accuracy', 'Precision', 'Recall', 'F1 Score']
+      };
     },
 
     createBeforeAfterChart() {
@@ -1602,79 +1716,7 @@ h1 {
   color: #333;
 }
 
-/* Summary cards */
-.summary-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 1.5rem;
-  margin-bottom: 2rem;
-}
-
-.summary-card {
-  /* background: white; */
-  border-radius: 12px;
-  padding: 1.5rem;
-
-  display: flex;
-  align-items: center;
-  border: 1px solid #eee;
-}
-
-.summary-icon {
-  font-size: 2.5rem;
-  margin-right: 1.5rem;
-  width: 64px;
-  height: 64px;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.summary-icon.accuracy {
-  background-color: #e3f2fd;
-  color: #1976d2;
-}
-
-.summary-icon.models {
-  background-color: #e8f5e9;
-  color: #2e7d32;
-}
-
-.summary-icon.datasets {
-  background-color: #fff3e0;
-  color: #e65100;
-}
-
-.summary-details h3 {
-  margin: 0 0 0.5rem 0;
-  font-size: 1rem;
-  color: #666;
-  font-weight: 500;
-}
-
-.metric {
-  font-size: 1.75rem;
-  font-weight: 600;
-  margin: 0 0 0.25rem 0;
-  color: #333;
-}
-
-.trend {
-  font-size: 0.85rem;
-  margin: 0;
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-
-.trend.positive {
-  color: #2e7d32;
-}
-
-.trend.negative {
-  color: #d32f2f;
-}
+/* Summary cards moved to separate component */
 
 /* Tabs */
 .tabs {

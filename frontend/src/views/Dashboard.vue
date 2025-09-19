@@ -73,11 +73,18 @@
         <div class="neumorphic-card">
           <div class="card-header">
             <h3>Model Performance</h3>
-            <select class="form-control form-control-sm" style="width: auto;">
-              <option>Last 7 days</option>
-              <option>Last 30 days</option>
-              <option>Last 90 days</option>
-            </select>
+            <div class="chart-controls">
+              <select v-model="selectedModel" @change="updateChartForModel" class="form-control form-control-sm">
+                <option value="all">All Models</option>
+                <option v-for="model in availableModels" :key="model" :value="model">{{ model }}</option>
+              </select>
+              <select v-model="selectedTimePeriod" @change="updateChartForModel" class="form-control form-control-sm" style="width: auto;">
+                <option value="7">Last 7 days</option>
+                <option value="30">Last 30 days</option>
+                <option value="90">Last 90 days</option>
+                <option value="all">All time</option>
+              </select>
+            </div>
           </div>
           <div class="chart-container">
             <div ref="chartRef" class="chart"></div>
@@ -126,6 +133,17 @@ export default {
         avgAccuracy: 0
       },
       recentActivities: [],
+      selectedModel: 'all',
+      selectedTimePeriod: '30',
+      availableModels: [],
+      allChartData: {
+        dates: [],
+        accuracy: [],
+        loss: [],
+        f1: [],
+        modelNames: [],
+        jobDetails: []
+      },
       chartOption: {
         title: {
           text: 'Model Performance Over Time',
@@ -574,33 +592,21 @@ export default {
               });
             }
             
-            // Update chart with real data including model names
-            this.chartOption.xAxis.data = realDates;
+            // Store all chart data for filtering
+            this.allChartData = {
+              dates: realDates,
+              accuracy: realAccuracyData,
+              loss: realLossData,
+              f1: realF1Data,
+              modelNames: modelNames,
+              jobDetails: jobDetails
+            };
             
-            // Create data points with model names for tooltips
-            this.chartOption.series[0].data = realAccuracyData.map((value, index) => ({
-              value: value,
-              name: modelNames[index],
-              jobDetails: jobDetails[index]
-            }));
+            // Extract unique model names for dropdown
+            this.availableModels = [...new Set(modelNames)];
             
-            this.chartOption.series[1].data = realLossData.map((value, index) => ({
-              value: value,
-              name: modelNames[index],
-              jobDetails: jobDetails[index]
-            }));
-            
-            this.chartOption.series[2].data = realF1Data.map((value, index) => ({
-              value: value,
-              name: modelNames[index],
-              jobDetails: jobDetails[index]
-            }));
-            
-            // Update chart title to reflect real data
-            this.chartOption.title.text = `Model Performance - ${completedJobs.length} Training Jobs`;
-            
-            // Update chart
-            this.updateChart(this.chartOption);
+            // Update chart with all data initially
+            this.updateChartForModel();
             
             // Update average accuracy in stats with real data
             this.stats.avgAccuracy = Math.round(realAccuracyData.reduce((a, b) => a + b, 0) / realAccuracyData.length);
@@ -617,6 +623,120 @@ export default {
       } catch (error) {
         console.error('Error loading real chart data:', error);
       }
+    },
+    
+    updateChartForModel() {
+      if (!this.allChartData.dates.length) return;
+      
+      let filteredData = this.allChartData;
+      let chartTitle = 'Model Performance - All Models';
+      
+      // First filter by time period
+      let timeFilteredIndices = [];
+      if (this.selectedTimePeriod !== 'all') {
+        const daysBack = parseInt(this.selectedTimePeriod);
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - daysBack);
+        
+        this.allChartData.jobDetails.forEach((jobDetail, index) => {
+          const jobDate = new Date(jobDetail.date);
+          if (jobDate >= cutoffDate) {
+            timeFilteredIndices.push(index);
+          }
+        });
+        
+        if (timeFilteredIndices.length === 0) {
+          // No data in selected time period
+          this.chartOption.xAxis.data = [];
+          this.chartOption.series[0].data = [];
+          this.chartOption.series[1].data = [];
+          this.chartOption.series[2].data = [];
+          this.chartOption.title.text = `No data in last ${daysBack} days`;
+          this.updateChart(this.chartOption);
+          return;
+        }
+        
+        filteredData = {
+          dates: timeFilteredIndices.map(i => this.allChartData.dates[i]),
+          accuracy: timeFilteredIndices.map(i => this.allChartData.accuracy[i]),
+          loss: timeFilteredIndices.map(i => this.allChartData.loss[i]),
+          f1: timeFilteredIndices.map(i => this.allChartData.f1[i]),
+          modelNames: timeFilteredIndices.map(i => this.allChartData.modelNames[i]),
+          jobDetails: timeFilteredIndices.map(i => this.allChartData.jobDetails[i])
+        };
+      }
+      
+      // Then filter by selected model
+      if (this.selectedModel !== 'all') {
+        const modelFilteredIndices = [];
+        filteredData.modelNames.forEach((modelName, index) => {
+          if (modelName === this.selectedModel) {
+            modelFilteredIndices.push(index);
+          }
+        });
+        
+        if (modelFilteredIndices.length === 0) {
+          // No data for selected model in time period
+          this.chartOption.xAxis.data = [];
+          this.chartOption.series[0].data = [];
+          this.chartOption.series[1].data = [];
+          this.chartOption.series[2].data = [];
+          this.chartOption.title.text = `No data for ${this.selectedModel} in selected period`;
+          this.updateChart(this.chartOption);
+          return;
+        }
+        
+        filteredData = {
+          dates: modelFilteredIndices.map(i => filteredData.dates[i]),
+          accuracy: modelFilteredIndices.map(i => filteredData.accuracy[i]),
+          loss: modelFilteredIndices.map(i => filteredData.loss[i]),
+          f1: modelFilteredIndices.map(i => filteredData.f1[i]),
+          modelNames: modelFilteredIndices.map(i => filteredData.modelNames[i]),
+          jobDetails: modelFilteredIndices.map(i => filteredData.jobDetails[i])
+        };
+        
+        chartTitle = `Model Performance - ${this.selectedModel}`;
+      } else {
+        chartTitle = `Model Performance - All Models`;
+      }
+      
+      // Add time period to title
+      if (this.selectedTimePeriod !== 'all') {
+        chartTitle += ` (Last ${this.selectedTimePeriod} days)`;
+      }
+      
+      // Update chart with filtered data
+      this.chartOption.xAxis.data = filteredData.dates;
+      
+      // Create data points with model names for tooltips
+      this.chartOption.series[0].data = filteredData.accuracy.map((value, index) => ({
+        value: value,
+        name: filteredData.modelNames[index],
+        jobDetails: filteredData.jobDetails[index]
+      }));
+      
+      this.chartOption.series[1].data = filteredData.loss.map((value, index) => ({
+        value: value,
+        name: filteredData.modelNames[index],
+        jobDetails: filteredData.jobDetails[index]
+      }));
+      
+      this.chartOption.series[2].data = filteredData.f1.map((value, index) => ({
+        value: value,
+        name: filteredData.modelNames[index],
+        jobDetails: filteredData.jobDetails[index]
+      }));
+      
+      // Update chart title
+      this.chartOption.title.text = chartTitle;
+      
+      // Update chart
+      this.updateChart(this.chartOption);
+      
+      console.log(`📊 Updated chart for model: ${this.selectedModel}`, {
+        dataPoints: filteredData.dates.length,
+        models: [...new Set(filteredData.modelNames)]
+      });
     },
     
     getTimeAgo(dateString) {
@@ -867,6 +987,16 @@ export default {
 .activity-time {
   font-size: 0.75rem;
   color: var(--secondary);
+}
+
+.chart-controls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.chart-controls select {
+  min-width: 120px;
 }
 
 .chart-container {
