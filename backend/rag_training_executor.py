@@ -117,12 +117,28 @@ class TrainingExecutor:
 
 SYSTEM "{role_definition}
 
-You have access to a vector-based knowledge base. Consider context and examples from your knowledge base to provide accurate responses."
+You have access to a vector-based knowledge base through ChromaDB. When responding:
+
+1. **Retrieve Relevant Context**: Use semantic similarity to find the most relevant examples from your knowledge base
+2. **Synthesize Responses**: Don't just copy examples - combine insights from multiple relevant sources
+3. **Maintain Diversity**: Vary your response style and approach based on the specific question
+4. **Stay Contextual**: Adapt your response to the user's specific needs and context
+5. **Avoid Repetition**: Don't repeat the same examples or responses for similar questions
+
+Guidelines for using your knowledge base:
+- Search for semantically similar examples, not exact matches
+- Combine insights from multiple relevant sources when possible
+- Adapt the style and tone to match the user's question
+- Provide fresh perspectives while staying accurate to your knowledge base
+- If no relevant context is found, acknowledge this and provide your best response based on your training"
 
 # RAG Configuration
 PARAMETER num_ctx 4096
-PARAMETER temperature 0.7
+PARAMETER temperature 0.8
 PARAMETER top_p 0.9
+PARAMETER top_k 40
+PARAMETER repeat_penalty 1.1
+PARAMETER repeat_last_n 64
 """
 
         modelfile_path = f"models/{job_name}/Modelfile"
@@ -179,19 +195,22 @@ PARAMETER top_p 0.9
 
             chromadb_samples = []
             for sample in dataset_samples:
-                text_parts = []
+                # Create context (what the model should retrieve)
+                context_parts = []
                 if sample.get('instruction'):
-                    text_parts.append(f"Instruction: {sample['instruction']}")
+                    context_parts.append(f"Instruction: {sample['instruction']}")
                 if sample.get('input'):
-                    text_parts.append(f"Input: {sample['input']}")
-                if sample.get('output'):
-                    text_parts.append(f"Output: {sample['output']}")
+                    context_parts.append(f"Input: {sample['input']}")
                 if sample.get('system'):
-                    text_parts.append(f"System: {sample['system']}")
-                combined_text = "\n".join(text_parts).strip()
-                if combined_text:
+                    context_parts.append(f"System: {sample['system']}")
+                
+                context_text = "\n".join(context_parts).strip()
+                response_text = sample.get('output', '')
+                
+                if context_text and response_text:
                     chromadb_samples.append({
-                        'output': combined_text,
+                        'context': context_text,  # What to retrieve
+                        'response': response_text,  # What to generate
                         'instruction': sample.get('instruction', ''),
                         'input': sample.get('input', ''),
                         'system': sample.get('system', ''),

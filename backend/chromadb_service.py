@@ -82,9 +82,11 @@ class ChromaDBService:
             ids = []
             
             for i, item in enumerate(dataset_data):
-                # Extract text content (prioritize 'output', then 'instruction', then 'code')
+                # Extract text content for embedding (use context for retrieval)
                 text_content = ""
-                if 'output' in item:
+                if 'context' in item:
+                    text_content = item['context']
+                elif 'output' in item:
                     text_content = item['output']
                 elif 'instruction' in item:
                     text_content = item['instruction']
@@ -101,7 +103,12 @@ class ChromaDBService:
                     metadatas.append({
                         "source": item.get('source', 'dataset'),
                         "type": item.get('type', 'text'),
-                        "index": i
+                        "index": i,
+                        "context": item.get('context', ''),
+                        "response": item.get('response', ''),
+                        "instruction": item.get('instruction', ''),
+                        "input": item.get('input', ''),
+                        "system": item.get('system', '')
                     })
                     ids.append(f"doc-{i}")
             
