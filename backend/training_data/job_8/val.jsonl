@@ -1,0 +1,1 @@
+{"instruction": "Calcula la integral indefinida \u222b(cos(x) * e^(sin(x))) dx.", "input": "", "output": "<answer>La integral indefinida de \u222b(cos(x) * e^(sin(x))) dx es e^(sin(x)) + C.</answer>", "system": ""}

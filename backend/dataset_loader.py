@@ -166,15 +166,32 @@ def check_and_convert_dataset_format(sample_data: List[Dict[str, Any]]) -> Dict[
         }
     
     # Check for other possible formats
-    if 'question' in sample_keys and 'answer' in sample_keys:
+    if 'question' in sample_keys and ('answer' in sample_keys or 'reference_answer' in sample_keys or 'answers' in sample_keys):
         print("🔄 Converting Q&A format to LoRA format...")
         converted_samples = []
         
         for sample in sample_data:
+            # Handle different answer field formats
+            answer_field = ''
+            
+            if 'answer' in sample:
+                answer_field = sample.get('answer', '')
+            elif 'reference_answer' in sample:
+                answer_field = sample.get('reference_answer', '')
+            elif 'answers' in sample:
+                answers = sample.get('answers', {})
+                if isinstance(answers, dict) and 'text' in answers:
+                    # Handle SQuAD format: {'text': ['answer1', 'answer2'], 'answer_start': [pos1, pos2]}
+                    answer_texts = answers.get('text', [])
+                    if answer_texts:
+                        answer_field = answer_texts[0]  # Use first answer
+                elif isinstance(answers, list) and answers:
+                    answer_field = str(answers[0])  # Use first answer if it's a list
+            
             converted_sample = {
                 'id': sample.get('id', ''),
                 'instruction': sample.get('question', ''),
-                'output': sample.get('answer', ''),
+                'output': answer_field,
                 'input': '',
                 'system': '',
                 'source': sample.get('source', ''),
@@ -197,7 +214,7 @@ def check_and_convert_dataset_format(sample_data: List[Dict[str, Any]]) -> Dict[
     for sample in sample_data:
         # Try to find instruction-like and output-like fields
         instruction_fields = ['text', 'input', 'prompt', 'question']
-        output_fields = ['response', 'answer', 'code', 'solution']
+        output_fields = ['response', 'answer', 'reference_answer', 'code', 'solution']
         
         instruction = ''
         output = ''
@@ -229,7 +246,7 @@ def check_and_convert_dataset_format(sample_data: List[Dict[str, Any]]) -> Dict[
         'is_lora_compatible': len(converted_samples) > 0,
         'converted_samples': converted_samples,
         'conversion_applied': True,
-        'format_analysis': f'Unknown format - basic conversion attempted ({len(converted_samples)} samples converted)',
+        'format_analysis': f'Unknown format - basic conversion attempted ({len(converted_samples)} samples converted). Available fields: {sample_keys}',
         'available_fields': sample_keys
     }
 
@@ -259,32 +276,13 @@ def load_any_dataset(dataset_id: str, max_samples: int = 1000) -> Dict[str, Any]
         for i in range(samples_to_load):
             sample = dataset_split[i]
             
-            # Try to extract common fields with fallbacks
-            sample_item = {
+            # Preserve original fields and add metadata
+            sample_item = dict(sample)  # Keep all original fields
+            sample_item.update({
                 'id': f'{dataset_id.replace("/", "-")}-{i}',
                 'type': 'Code' if 'code' in str(sample).lower() else 'Text',
                 'source': f'Hugging Face - {dataset_id}'
-            }
-            
-            # Extract instruction/input
-            for field in ['instruction', 'input', 'prompt', 'question', 'text']:
-                if field in sample:
-                    sample_item['instruction'] = str(sample[field])
-                    break
-            
-            # Extract output/target
-            for field in ['output', 'target', 'answer', 'response', 'code', 'solution']:
-                if field in sample:
-                    sample_item['output'] = str(sample[field])
-                    break
-            
-            # Extract system prompt if available
-            if 'system' in sample:
-                sample_item['system'] = str(sample['system'])
-            
-            # If no instruction/output found, use all available fields
-            if 'instruction' not in sample_item:
-                sample_item['content'] = str(sample)
+            })
             
             sample_data.append(sample_item)
         
@@ -298,6 +296,32 @@ def load_any_dataset(dataset_id: str, max_samples: int = 1000) -> Dict[str, Any]
             print(f"✅ Format conversion applied: {format_analysis['format_analysis']}")
         else:
             print(f"ℹ️ No conversion needed: {format_analysis['format_analysis']}")
+        
+        # 🚫 REJECTION: If no samples were converted or samples have empty outputs, reject the dataset
+        if len(sample_data) == 0:
+            error_msg = f"Dataset format not supported. {format_analysis['format_analysis']}"
+            print(f"❌ {error_msg}")
+            return {
+                'success': False,
+                'error': error_msg,
+                'dataset_id': dataset_id,
+                'format_analysis': format_analysis
+            }
+        
+        # Check if samples have meaningful content (instruction and output)
+        valid_samples = [s for s in sample_data if s.get('instruction', '').strip() and s.get('output', '').strip()]
+        if len(valid_samples) == 0:
+            error_msg = f"Dataset format not supported. No valid instruction/output pairs found. {format_analysis['format_analysis']}"
+            print(f"❌ {error_msg}")
+            return {
+                'success': False,
+                'error': error_msg,
+                'dataset_id': dataset_id,
+                'format_analysis': format_analysis
+            }
+        
+        # Use only valid samples
+        sample_data = valid_samples
         
         # Estimate size
         avg_sample_size = len(str(sample_data[0])) if sample_data else 0

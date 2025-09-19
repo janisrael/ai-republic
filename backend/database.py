@@ -406,8 +406,8 @@ class Database:
             cursor.execute('''
                 INSERT INTO evaluations (
                     model_name, dataset_id, evaluation_type, before_metrics,
-                    after_metrics, improvement, notes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    after_metrics, improvement, notes, status, completed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 eval_data.get('model_name'),
                 eval_data.get('dataset_id'),
@@ -415,7 +415,9 @@ class Database:
                 before_metrics_json,
                 after_metrics_json,
                 eval_data.get('improvement'),
-                eval_data.get('notes')
+                eval_data.get('notes'),
+                eval_data.get('status', 'PENDING'),
+                eval_data.get('completed_at')
             ))
             
             eval_id = cursor.lastrowid
