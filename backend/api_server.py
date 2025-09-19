@@ -181,8 +181,8 @@ def toggle_favorite(dataset_id):
         }), 500
 
 
-def sanitize_model_name(job_name):
-    """Convert job name to valid Ollama model name"""
+def sanitize_model_name(job_name, version=''):
+    """Convert job name to valid Ollama model name with version"""
     # Remove special characters and convert to lowercase
     sanitized = re.sub(r'[^a-zA-Z0-9\s-]', '', job_name)
     # Replace spaces with hyphens
@@ -193,9 +193,15 @@ def sanitize_model_name(job_name):
     sanitized = re.sub(r'-+', '-', sanitized)
     # Remove leading/trailing hyphens
     sanitized = sanitized.strip('-')
-    # Add :latest tag if not present
-    if not sanitized.endswith(':latest'):
+    
+    # Add version if provided, otherwise add :latest
+    if version and version.strip():
+        version_clean = re.sub(r'[^a-zA-Z0-9\-_.]', '-', version.strip())
+        version_clean = version_clean.lower()
+        sanitized += f':{version_clean}'
+    else:
         sanitized += ':latest'
+    
     return sanitized
 
 @app.route('/api/training-jobs', methods=['GET'])
@@ -233,8 +239,8 @@ def create_training_job():
                 'error': 'Base model is required'
             }), 400
         
-        # Generate model name from job name
-        model_name = sanitize_model_name(data['jobName'])
+        # Generate model name from job name and version
+        model_name = sanitize_model_name(data['jobName'], data.get('version', ''))
         
         # Prepare job data
         job_data = {

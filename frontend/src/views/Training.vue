@@ -228,6 +228,17 @@
               </div>
               
               <div class="form-group">
+                <label>Version</label>
+                <input 
+                  type="text" 
+                  v-model="newTraining.version" 
+                  placeholder="e.g., v1.0, 2.1.3, beta"
+                  class="form-control"
+                >
+                <small>Version tag (will create name:version format for Ollama)</small>
+              </div>
+              
+              <div class="form-group">
                 <label>Description</label>
                 <textarea 
                   v-model="newTraining.description" 
@@ -241,7 +252,7 @@
               <div class="form-group">
                 <label>Job Type</label>
                 <select v-model="newTraining.jobType" class="form-control">
-                  <option value="experimental">Experimental</option>
+<option value="experimental">Experimental</option>
                   <option value="production">Production</option>
                   <option value="research">Research</option>
                   <option value="personal">Personal</option>
@@ -259,17 +270,6 @@
                   class="form-control"
                 >
                 <small>Who is creating this training job</small>
-              </div>
-              
-              <div class="form-group">
-                <label>Version</label>
-                <input 
-                  type="text" 
-                  v-model="newTraining.version" 
-                  placeholder="e.g., v1.0, 2.1.3, beta"
-                  class="form-control"
-                >
-                <small>Version identifier for this training job</small>
               </div>
             </div>
           </div>
