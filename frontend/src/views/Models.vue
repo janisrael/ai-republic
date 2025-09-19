@@ -187,14 +187,31 @@
                   <span class="material-icons-round">speed</span>
                   {{ formatNumber(model.details?.context_length) }}
                 </span>
+                <span class="stat">
+                  <span class="material-icons-round">tune</span>
+                  {{ model.details?.quantization || 'N/A' }}
+                </span>
               </div>
               <div class="model-capabilities">
                 <span 
-                  v-for="capability in model.details?.capabilities?.slice(0, 3)" 
+                  v-for="capability in model.details?.capabilities?.slice(0, 4)" 
                   :key="capability"
                   class="capability-tag"
                 >
                   {{ capability }}
+                </span>
+                <span v-if="model.details?.capabilities?.length > 4" class="capability-more">
+                  +{{ model.details.capabilities.length - 4 }} more
+                </span>
+              </div>
+              <div class="model-params" v-if="model.details?.temperature || model.details?.top_p">
+                <span class="param">
+                  <span class="material-icons-round">thermostat</span>
+                  T: {{ model.details.temperature }}
+                </span>
+                <span class="param">
+                  <span class="material-icons-round">filter_alt</span>
+                  P: {{ model.details.top_p }}
                 </span>
               </div>
             </div>
@@ -1082,10 +1099,22 @@ export default {
             accuracy: this.getModelAccuracy(model.name),
             trainingTime: this.formatModelSize(model.size),
             datasetSize: this.getModelSize(model.size),
-              updatedAt: this.parseModelDate(model.modified),
+            updatedAt: this.parseModelDate(model.modified),
             tags: this.getModelTags(model.name),
             isFavorite: this.isFavoriteModel(model.name),
             capabilities: model.capabilities || [],
+            // Enhanced model details from ollama show
+            details: {
+              capabilities: model.capabilities || [],
+              architecture: model.architecture || 'Unknown',
+              parameters: model.parameters || 'Unknown',
+              context_length: model.context_length || 'Unknown',
+              quantization: model.quantization || 'Unknown',
+              temperature: model.temperature || 0.7,
+              top_p: model.top_p || 0.9,
+              system_prompt: model.system_prompt || '',
+              license: model.license || 'Unknown'
+            },
             ollamaModel: model // Keep original backend data
           }));
         } else {
@@ -1933,6 +1962,32 @@ export default {
   padding: 0.25rem 0.5rem;
   border-radius: 4px;
   font-size: 0.75rem;
+}
+
+.capability-more {
+  background: rgba(108, 117, 125, 0.1);
+  color: #6c757d;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+}
+
+.model-params {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.param {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: #6c757d;
+}
+
+.param .material-icons-round {
+  font-size: 14px;
 }
 
 .rank-score {

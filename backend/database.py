@@ -52,6 +52,7 @@ class Database:
                     name TEXT NOT NULL,
                     description TEXT,
                     job_type TEXT DEFAULT 'experimental',
+                    custom_capabilities TEXT,  -- JSON array of custom capabilities
                     maker TEXT,
                     version TEXT,
                     base_model TEXT NOT NULL,
@@ -61,6 +62,9 @@ class Database:
                     training_type TEXT DEFAULT 'LoRA',
                     progress REAL DEFAULT 0.0,
                     metrics TEXT,  -- JSON object
+                    temperature REAL DEFAULT 0.7,
+                    top_p REAL DEFAULT 0.9,
+                    context_length INTEGER DEFAULT 4096,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     started_at TIMESTAMP,
                     completed_at TIMESTAMP,
@@ -69,6 +73,9 @@ class Database:
                     FOREIGN KEY (dataset_id) REFERENCES datasets (id)
                 )
             ''')
+            
+            # Add new columns to existing table if they don't exist
+            self.migrate_training_jobs_table()
             
             # Create evaluations table
             cursor.execute('''
@@ -124,6 +131,32 @@ class Database:
             conn.commit()
             print(f"✅ Dataset '{dataset_data.get('name')}' added with ID {dataset_id}")
             return dataset_id
+    
+    def migrate_training_jobs_table(self):
+        """Add new columns to training_jobs table if they don't exist"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            # Check if columns exist and add them if they don't
+            cursor.execute("PRAGMA table_info(training_jobs)")
+            columns = [column[1] for column in cursor.fetchall()]
+            
+            new_columns = [
+                ('custom_capabilities', 'TEXT'),
+                ('temperature', 'REAL DEFAULT 0.7'),
+                ('top_p', 'REAL DEFAULT 0.9'),
+                ('context_length', 'INTEGER DEFAULT 4096')
+            ]
+            
+            for column_name, column_def in new_columns:
+                if column_name not in columns:
+                    try:
+                        cursor.execute(f'ALTER TABLE training_jobs ADD COLUMN {column_name} {column_def}')
+                        print(f"✅ Added column {column_name} to training_jobs table")
+                    except sqlite3.Error as e:
+                        print(f"⚠️ Could not add column {column_name}: {e}")
+            
+            conn.commit()
     
     def get_all_datasets(self) -> List[Dict[str, Any]]:
         """Get all datasets from the database (lightweight version for API)"""
@@ -233,15 +266,19 @@ class Database:
             metrics_json = json.dumps(job_data.get('metrics', {}))
             config_json = json.dumps(job_data.get('config', {}))
             
+            # Handle custom capabilities
+            custom_capabilities_json = json.dumps(job_data.get('custom_capabilities', []))
+            
             cursor.execute('''
                 INSERT INTO training_jobs (
-                    name, description, job_type, maker, version, base_model, model_name,
-                    dataset_id, status, training_type, progress, metrics, config
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    name, description, job_type, custom_capabilities, maker, version, base_model, model_name,
+                    dataset_id, status, training_type, progress, metrics, config, temperature, top_p, context_length
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 job_data.get('name'),
                 job_data.get('description', ''),
                 job_data.get('job_type', 'experimental'),
+                custom_capabilities_json,
                 job_data.get('maker', ''),
                 job_data.get('version', ''),
                 job_data.get('base_model'),
@@ -251,7 +288,10 @@ class Database:
                 job_data.get('training_type', 'LoRA'),
                 job_data.get('progress', 0.0),
                 metrics_json,
-                config_json
+                config_json,
+                job_data.get('temperature', 0.7),
+                job_data.get('top_p', 0.9),
+                job_data.get('context_length', 4096)
             ))
             
             job_id = cursor.lastrowid

@@ -250,15 +250,14 @@
               </div>
               
               <div class="form-group">
-                <label>Job Type</label>
-                <select v-model="newTraining.jobType" class="form-control">
-<option value="experimental">Experimental</option>
-                  <option value="production">Production</option>
-                  <option value="research">Research</option>
-                  <option value="personal">Personal</option>
-                  <option value="demo">Demo</option>
-                </select>
-                <small>Category for organizing your training jobs</small>
+                <label>Custom Capabilities</label>
+                <input 
+                  type="text" 
+                  v-model="newTraining.customCapabilities" 
+                  placeholder="e.g., DevOps, Kubernetes, Docker, CI/CD"
+                  class="form-control"
+                >
+                <small>Comma-separated custom capabilities (will be added to model capabilities)</small>
               </div>
               
               <div class="form-group">
@@ -413,6 +412,28 @@
             <small>Define the AI's personality, role, and behavior</small>
           </div>
 
+          <!-- Model Parameters -->
+          <div class="model-params">
+            <h3>Model Parameters</h3>
+            <div class="params-grid">
+              <div class="form-group">
+                <label>Temperature</label>
+                <input type="number" v-model="newTraining.temperature" min="0.1" max="2.0" step="0.1" class="form-control">
+                <small>Controls randomness (0.1 = focused, 2.0 = creative)</small>
+              </div>
+              <div class="form-group">
+                <label>Top P</label>
+                <input type="number" v-model="newTraining.top_p" min="0.1" max="1.0" step="0.1" class="form-control">
+                <small>Controls diversity (0.1 = focused, 1.0 = diverse)</small>
+              </div>
+              <div class="form-group">
+                <label>Context Length</label>
+                <input type="number" v-model="newTraining.context_length" min="512" max="32768" step="512" class="form-control">
+                <small>Maximum context window size</small>
+              </div>
+            </div>
+          </div>
+
           <!-- Training Parameters -->
           <div class="training-params">
             <h3>Training Parameters</h3>
@@ -517,7 +538,7 @@ export default {
       newTraining: {
         jobName: '',
         description: '',
-        jobType: 'experimental',
+        customCapabilities: '',
         maker: 'TheSwordfish',
         version: '',
         type: 'lora',
@@ -526,6 +547,9 @@ export default {
         selectedDatasets: [],
         trainingStrategy: 'concatenate',
         roleDefinition: 'You are Agimat, an advanced AI assistant specialized in debugging and code analysis. You provide step-by-step guidance, identify issues, and offer practical solutions.',
+        temperature: 0.7,
+        top_p: 0.9,
+        context_length: 4096,
         loraConfig: {
           rank: 8,
           alpha: 32,
@@ -879,11 +903,16 @@ export default {
     },
     async createTrainingJob() {
       try {
+        // Process custom capabilities
+        const customCapabilities = this.newTraining.customCapabilities
+          ? this.newTraining.customCapabilities.split(',').map(cap => cap.trim()).filter(cap => cap)
+          : [];
+
         // Prepare training job data
         const trainingData = {
           jobName: this.newTraining.jobName,
           description: this.newTraining.description,
-          jobType: this.newTraining.jobType,
+          customCapabilities: customCapabilities,
           maker: this.newTraining.maker,
           version: this.newTraining.version,
           baseModel: this.newTraining.baseModel,
@@ -891,6 +920,9 @@ export default {
           selectedDatasets: this.newTraining.selectedDatasets,
           trainingStrategy: this.newTraining.trainingStrategy,
           roleDefinition: this.newTraining.roleDefinition,
+          temperature: this.newTraining.temperature,
+          top_p: this.newTraining.top_p,
+          context_length: this.newTraining.context_length,
           loraConfig: this.newTraining.loraConfig,
           params: this.newTraining.params,
           ragConfig: this.newTraining.ragConfig

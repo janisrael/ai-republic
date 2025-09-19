@@ -185,9 +185,16 @@ PARAMETER top_p 0.9
         return chromadb_samples
 
     def _create_ollama_model(self, model_name: str):
-        sanitized_name = re.sub(r'[^a-zA-Z0-9.-]', '-', model_name.lower())
-        if not sanitized_name.endswith(':latest'):
+        # Preserve the version from model_name (e.g., "bandila:1.0" stays "bandila:1.0")
+        # Only sanitize the base name part, keep the version intact
+        if ':' in model_name:
+            base_name, version = model_name.split(':', 1)
+            sanitized_base = re.sub(r'[^a-zA-Z0-9.-]', '-', base_name.lower())
+            sanitized_name = f"{sanitized_base}:{version}"
+        else:
+            sanitized_name = re.sub(r'[^a-zA-Z0-9.-]', '-', model_name.lower())
             sanitized_name += ':latest'
+        
         modelfile_path = os.path.abspath(f"models/{model_name}/Modelfile")
         if not os.path.exists(modelfile_path):
             raise FileNotFoundError(f"Modelfile not found: {modelfile_path}")
@@ -276,10 +283,19 @@ PARAMETER top_p 0.9
         subprocess.run(['python', script_path], check=True, text=True)
 
     def _create_ollama_model_from_lora(self, model_name: str, base_model: str):
-        clean_name = re.sub(r'[^a-zA-Z0-9\-_]', '-', model_name.lower())
+        # Preserve the version from model_name (e.g., "bandila:1.0" stays "bandila:1.0")
+        if ':' in model_name:
+            base_name, version = model_name.split(':', 1)
+            clean_base = re.sub(r'[^a-zA-Z0-9\-_]', '-', base_name.lower())
+            clean_name = f"{clean_base}:{version}"
+        else:
+            clean_name = re.sub(r'[^a-zA-Z0-9\-_]', '-', model_name.lower())
+            clean_name += ':latest'
+        
         # Check both sanitized and original names for the model path
-        merged_path_sanitized = f"models/{clean_name}_lora_merged"
-        regular_path_sanitized = f"models/{clean_name}_lora"
+        clean_base_only = re.sub(r'[^a-zA-Z0-9\-_]', '-', model_name.lower()).split(':')[0]
+        merged_path_sanitized = f"models/{clean_base_only}_lora_merged"
+        regular_path_sanitized = f"models/{clean_base_only}_lora"
         merged_path_original = f"models/{model_name}_lora_merged"
         regular_path_original = f"models/{model_name}_lora"
         
@@ -296,9 +312,12 @@ PARAMETER top_p 0.9
             model_path = merged_path_sanitized  # Default for error message
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Model path not found: {model_path}")
+        
+        # Use the base name (without version) for the system prompt
+        base_name_for_prompt = model_name.split(':')[0]
         modelfile_content = f"""FROM {base_model}
 
-SYSTEM "You are {clean_name}, fine-tuned using LoRA."
+SYSTEM "You are {base_name_for_prompt}, fine-tuned using LoRA."
 PARAMETER num_ctx 4096
 PARAMETER temperature 0.7
 """
