@@ -105,6 +105,9 @@ class TrainingExecutor:
                 'actual_model_name': actual_model_name  # Store the actual Ollama model name
             })
             
+            # Create model profile
+            self._create_model_profile(job_id, actual_model_name)
+            
             # Store evaluation results in database immediately
             self._store_training_evaluation(job_id, actual_model_name, job_data.get('base_model'), config)
 
@@ -228,6 +231,22 @@ PARAMETER repeat_last_n 64
             import traceback
             traceback.print_exc()
             raise
+
+    def _create_model_profile(self, job_id: int, model_name: str):
+        """Create model profile when training completes"""
+        try:
+            profile_data = {
+                'model_name': model_name,
+                'training_job_id': job_id,
+                'avatar_path': None,
+                'avatar_url': None
+            }
+            
+            profile_id = db.add_model_profile(profile_data)
+            print(f"✅ Created model profile {profile_id} for {model_name}")
+            
+        except Exception as e:
+            print(f"❌ Failed to create model profile: {e}")
 
     def _create_ollama_model(self, model_name: str):
         """Create Ollama model from Modelfile"""

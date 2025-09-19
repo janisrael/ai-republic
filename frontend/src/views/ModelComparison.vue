@@ -83,7 +83,15 @@
               @click="toggleModelSelection(model.name)"
             >
               <div class="model-info">
-                <h4>{{ model.name }}</h4>
+                <div class="model-header-with-avatar">
+                  <div class="model-avatar" v-if="model.avatar_url">
+                    <img :src="model.avatar_url" :alt="model.name + ' avatar'" class="avatar-image">
+                  </div>
+                  <div class="model-avatar-placeholder" v-else>
+                    <span class="material-icons-round">smart_toy</span>
+                  </div>
+                  <h4>{{ model.name }}</h4>
+                </div>
                 <p class="model-size">{{ model.size }}</p>
                 <div class="model-capabilities">
                   <span 
@@ -195,8 +203,18 @@
             <tr v-for="model in comparisonData" :key="model.name">
               <td class="model-name-cell">
                 <div class="model-name">
-                  <strong>{{ model.name }}</strong>
-                  <small>{{ model.details.architecture || 'Unknown' }}</small>
+                  <div class="model-name-with-avatar">
+                    <div class="model-avatar-small" v-if="model.avatar_url">
+                      <img :src="model.avatar_url" :alt="model.name + ' avatar'" class="avatar-image-small">
+                    </div>
+                    <div class="model-avatar-placeholder-small" v-else>
+                      <span class="material-icons-round">smart_toy</span>
+                    </div>
+                    <div class="model-name-text">
+                      <strong>{{ model.name }}</strong>
+                      <small>{{ model.details.architecture || 'Unknown' }}</small>
+                    </div>
+                  </div>
                 </div>
               </td>
               <td>{{ model.details.parameters || 'Unknown' }}</td>
@@ -810,6 +828,45 @@ export default {
   background: linear-gradient(135deg, rgba(78, 115, 223, 0.1) 0%, rgba(78, 115, 223, 0.05) 100%);
 }
 
+.model-header-with-avatar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.model-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.avatar-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.model-avatar-placeholder {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--primary-color, #4e73df);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.model-avatar-placeholder .material-icons-round {
+  font-size: 20px;
+}
+
 .model-info h4 {
   font-size: 1rem;
   font-weight: 600;
@@ -957,6 +1014,48 @@ export default {
 
 .model-name-cell {
   min-width: 150px;
+}
+
+.model-name-with-avatar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.model-avatar-small {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+}
+
+.avatar-image-small {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.model-avatar-placeholder-small {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--primary-color, #4e73df);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+}
+
+.model-avatar-placeholder-small .material-icons-round {
+  font-size: 12px;
+}
+
+.model-name-text {
+  flex: 1;
 }
 
 .model-name strong {

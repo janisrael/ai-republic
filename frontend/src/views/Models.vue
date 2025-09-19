@@ -188,7 +188,15 @@
               </button>
             </div>
             <div class="model-info">
-              <h4>{{ model.name }}</h4>
+              <div class="model-header-with-avatar">
+                <div class="model-avatar" v-if="model.avatar_url">
+                  <img :src="model.avatar_url" :alt="model.name + ' avatar'" class="avatar-image">
+                </div>
+                <div class="model-avatar-placeholder" v-else>
+                  <span class="material-icons-round">smart_toy</span>
+                </div>
+                <h4>{{ model.name }}</h4>
+              </div>
               <div class="model-stats">
                 <span class="stat">
                   <span class="material-icons-round">memory</span>
@@ -2790,6 +2798,45 @@ export default {
 
 .model-info {
   flex: 1;
+}
+
+.model-header-with-avatar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.model-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.avatar-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.model-avatar-placeholder {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--primary-color, #4e73df);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.model-avatar-placeholder .material-icons-round {
+  font-size: 20px;
 }
 
 .model-info h4 {

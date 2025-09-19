@@ -61,9 +61,12 @@ def load_new_dataset():
             }), 400
             
         dataset_id = data.get('dataset_id')
+        custom_name = data.get('custom_name')
+        custom_description = data.get('custom_description')
+        
         print(f"Dataset ID extracted: {dataset_id}")
-        print(f"Dataset ID type: {type(dataset_id)}")
-        print(f"Dataset ID repr: {repr(dataset_id)}")
+        print(f"Custom name: {custom_name}")
+        print(f"Custom description: {custom_description}")
         
         if not dataset_id:
             return jsonify({
@@ -92,8 +95,8 @@ def load_new_dataset():
             
             # Prepare dataset data for database
             dataset_data = {
-                'name': result['name'],
-                'description': result['description'],
+                'name': custom_name if custom_name else result['name'],
+                'description': custom_description if custom_description else result['description'],
                 'dataset_id': result['dataset_id'],
                 'type': 'Text',
                 'sample_count': result['total_samples'],
@@ -384,7 +387,22 @@ def get_training_jobs():
 def create_training_job():
     """Create a new training job"""
     try:
-        data = request.get_json()
+        # Handle both JSON and FormData requests
+        if request.content_type and 'multipart/form-data' in request.content_type:
+            # FormData request (with avatar)
+            training_data_str = request.form.get('trainingData')
+            if not training_data_str:
+                return jsonify({
+                    'success': False,
+                    'error': 'Training data is required'
+                }), 400
+            
+            data = json.loads(training_data_str)
+            avatar_file = request.files.get('avatar')
+        else:
+            # Regular JSON request
+            data = request.get_json()
+            avatar_file = None
         
         # Validate required fields
         if not data.get('jobName'):
@@ -424,12 +442,65 @@ def create_training_job():
         # Save to database
         job_id = db.add_training_job(job_data)
         
+        # Handle avatar upload if provided
+        avatar_url = None
+        if avatar_file:
+            try:
+                from werkzeug.utils import secure_filename
+                import os
+                import uuid
+                from PIL import Image
+                
+                # Validate file type
+                allowed_extensions = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+                if not ('.' in avatar_file.filename and 
+                        avatar_file.filename.rsplit('.', 1)[1].lower() in allowed_extensions):
+                    print(f"Warning: Invalid avatar file type for job {job_id}")
+                else:
+                    # Create avatars directory
+                    avatars_dir = os.path.join(os.path.dirname(__file__), 'avatars')
+                    os.makedirs(avatars_dir, exist_ok=True)
+                    
+                    # Generate unique filename
+                    file_extension = avatar_file.filename.rsplit('.', 1)[1].lower()
+                    unique_filename = f"{secure_filename(model_name)}_{uuid.uuid4().hex[:8]}.{file_extension}"
+                    file_path = os.path.join(avatars_dir, unique_filename)
+                    
+                    # Save file
+                    avatar_file.save(file_path)
+                    
+                    # Resize image to standard avatar size (128x128)
+                    try:
+                        with Image.open(file_path) as img:
+                            img = img.convert('RGB')
+                            img = img.resize((128, 128), Image.Resampling.LANCZOS)
+                            img.save(file_path, 'JPEG', quality=85)
+                    except Exception as e:
+                        print(f"Warning: Could not resize avatar image: {e}")
+                    
+                    # Generate URL
+                    avatar_url = f"/api/avatars/{unique_filename}"
+                    
+                    # Create model profile with avatar
+                    profile_data = {
+                        'model_name': model_name,
+                        'training_job_id': job_id,
+                        'avatar_path': file_path,
+                        'avatar_url': avatar_url
+                    }
+                    db.add_model_profile(profile_data)
+                    print(f"✅ Created model profile with avatar for {model_name}")
+                    
+            except Exception as e:
+                print(f"Warning: Failed to process avatar for job {job_id}: {e}")
+        
         return jsonify({
             'success': True,
             'message': 'Training job created successfully',
             'job_id': job_id,
             'model_name': model_name,
-            'job': job_data
+            'job': job_data,
+            'avatar_url': avatar_url
         })
         
     except Exception as e:
@@ -865,6 +936,10 @@ def get_ollama_models():
                     # Get detailed model information from ollama show
                     model_details = get_model_details_from_ollama(model_name)
                     
+                    # Get avatar information from model profile
+                    profile = db.get_model_profile(model_name)
+                    avatar_url = profile['avatar_url'] if profile else None
+                    
                     models.append({
                         'name': model_name,
                         'size': size,
@@ -878,6 +953,7 @@ def get_ollama_models():
                         'top_p': model_details['top_p'],
                         'system_prompt': model_details['system_prompt'],
                         'license': model_details['license'],
+                        'avatar_url': avatar_url,
                         'type': 'ollama'
                     })
         
@@ -990,6 +1066,109 @@ SYSTEM "{system_prompt}"
             'success': False,
             'error': str(e)
         }), 500
+
+@app.route('/api/models/<path:model_name>/avatar', methods=['POST'])
+def upload_model_avatar(model_name):
+    """Upload avatar for a model"""
+    try:
+        from werkzeug.utils import secure_filename
+        import os
+        import uuid
+        from PIL import Image
+        
+        if 'avatar' not in request.files:
+            return jsonify({
+                'success': False,
+                'error': 'No avatar file provided'
+            }), 400
+        
+        file = request.files['avatar']
+        if file.filename == '':
+            return jsonify({
+                'success': False,
+                'error': 'No file selected'
+            }), 400
+        
+        # Validate file type
+        allowed_extensions = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+        if not ('.' in file.filename and 
+                file.filename.rsplit('.', 1)[1].lower() in allowed_extensions):
+            return jsonify({
+                'success': False,
+                'error': 'Invalid file type. Allowed: PNG, JPG, JPEG, GIF, WEBP'
+            }), 400
+        
+        # Create avatars directory
+        avatars_dir = os.path.join(os.path.dirname(__file__), 'avatars')
+        os.makedirs(avatars_dir, exist_ok=True)
+        
+        # Generate unique filename
+        file_extension = file.filename.rsplit('.', 1)[1].lower()
+        unique_filename = f"{secure_filename(model_name)}_{uuid.uuid4().hex[:8]}.{file_extension}"
+        file_path = os.path.join(avatars_dir, unique_filename)
+        
+        # Save file
+        file.save(file_path)
+        
+        # Resize image to standard avatar size (128x128)
+        try:
+            with Image.open(file_path) as img:
+                img = img.convert('RGB')
+                img = img.resize((128, 128), Image.Resampling.LANCZOS)
+                img.save(file_path, 'JPEG', quality=85)
+        except Exception as e:
+            print(f"Warning: Could not resize image: {e}")
+        
+        # Generate URL
+        avatar_url = f"/api/avatars/{unique_filename}"
+        
+        # Update or create model profile
+        profile_data = {
+            'model_name': model_name,
+            'avatar_path': file_path,
+            'avatar_url': avatar_url
+        }
+        
+        # Check if profile exists
+        existing_profile = db.get_model_profile(model_name)
+        if existing_profile:
+            # Update existing profile
+            db.update_model_profile(model_name, {
+                'avatar_path': file_path,
+                'avatar_url': avatar_url
+            })
+        else:
+            # Create new profile
+            db.add_model_profile(profile_data)
+        
+        return jsonify({
+            'success': True,
+            'message': f'Avatar uploaded successfully for {model_name}',
+            'avatar_url': avatar_url,
+            'file_path': file_path
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/avatars/<filename>')
+def serve_avatar(filename):
+    """Serve avatar images"""
+    try:
+        from flask import send_from_directory
+        import os
+        
+        avatars_dir = os.path.join(os.path.dirname(__file__), 'avatars')
+        return send_from_directory(avatars_dir, filename)
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 404
 
 @app.route('/api/models/<path:model_name>/details', methods=['GET'])
 def get_model_details(model_name):

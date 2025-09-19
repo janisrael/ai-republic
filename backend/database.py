@@ -77,6 +77,20 @@ class Database:
             # Add new columns to existing table if they don't exist
             self.migrate_training_jobs_table()
             
+            # Create model_profiles table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS model_profiles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    model_name TEXT UNIQUE NOT NULL,
+                    training_job_id INTEGER,
+                    avatar_path TEXT,
+                    avatar_url TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (training_job_id) REFERENCES training_jobs (id)
+                )
+            ''')
+            
             # Create evaluations table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS evaluations (
@@ -453,6 +467,85 @@ class Database:
             cursor.execute(query, values)
             conn.commit()
             
+            return cursor.rowcount > 0
+    
+    # Model Profile Methods
+    def add_model_profile(self, profile_data: Dict[str, Any]) -> int:
+        """Add a new model profile"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                INSERT INTO model_profiles (model_name, training_job_id, avatar_path, avatar_url)
+                VALUES (?, ?, ?, ?)
+            ''', (
+                profile_data['model_name'],
+                profile_data.get('training_job_id'),
+                profile_data.get('avatar_path'),
+                profile_data.get('avatar_url')
+            ))
+            conn.commit()
+            return cursor.lastrowid
+    
+    def get_model_profile(self, model_name: str) -> Optional[Dict[str, Any]]:
+        """Get model profile by model name"""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                SELECT * FROM model_profiles WHERE model_name = ?
+            ''', (model_name,))
+            
+            row = cursor.fetchone()
+            if row:
+                return dict(row)
+            return None
+    
+    def get_all_model_profiles(self) -> List[Dict[str, Any]]:
+        """Get all model profiles"""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                SELECT * FROM model_profiles ORDER BY created_at DESC
+            ''')
+            
+            return [dict(row) for row in cursor.fetchall()]
+    
+    def update_model_profile(self, model_name: str, updates: Dict[str, Any]) -> bool:
+        """Update model profile"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            # Prepare update fields
+            update_fields = []
+            update_values = []
+            
+            for key, value in updates.items():
+                if key in ['avatar_path', 'avatar_url']:
+                    update_fields.append(f"{key} = ?")
+                    update_values.append(value)
+            
+            if not update_fields:
+                return False
+            
+            update_fields.append("updated_at = CURRENT_TIMESTAMP")
+            update_values.append(model_name)
+            
+            query = f"UPDATE model_profiles SET {', '.join(update_fields)} WHERE model_name = ?"
+            cursor.execute(query, update_values)
+            conn.commit()
+            
+            return cursor.rowcount > 0
+    
+    def delete_model_profile(self, model_name: str) -> bool:
+        """Delete model profile"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM model_profiles WHERE model_name = ?", (model_name,))
+            conn.commit()
             return cursor.rowcount > 0
     
     def _create_automatic_evaluation(self, job_id: int):

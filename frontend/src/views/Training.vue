@@ -434,6 +434,36 @@
             </div>
           </div>
 
+          <!-- Avatar Upload -->
+          <div class="form-group">
+            <label>Model Avatar <small>(Optional)</small></label>
+            <div class="avatar-upload">
+              <div class="avatar-preview" v-if="newTraining.avatarPreview">
+                <img :src="newTraining.avatarPreview" alt="Avatar preview" class="preview-image">
+                <button type="button" class="remove-avatar" @click="removeAvatar">
+                  <Icon name="close" size="xs" color="danger" />
+                </button>
+              </div>
+              <div v-else class="avatar-placeholder">
+                <Icon name="image" size="lg" color="muted" />
+                <p>No avatar selected</p>
+              </div>
+              <input 
+                type="file" 
+                ref="avatarInput"
+                @change="handleAvatarUpload" 
+                accept="image/*"
+                class="avatar-input"
+                id="avatar-upload"
+              >
+              <label for="avatar-upload" class="avatar-upload-btn">
+                <Icon name="upload" size="sm" color="primary" />
+                {{ newTraining.avatarPreview ? 'Change Avatar' : 'Upload Avatar' }}
+              </label>
+              <small>Upload an image to personalize your model (PNG, JPG, GIF, WEBP - Max 5MB)</small>
+            </div>
+          </div>
+
           <!-- Training Parameters -->
           <div class="training-params">
             <h3>Training Parameters</h3>
@@ -550,6 +580,8 @@ export default {
         temperature: 0.7,
         top_p: 0.9,
         context_length: 4096,
+        avatarFile: null,
+        avatarPreview: null,
         loraConfig: {
           rank: 8,
           alpha: 32,
@@ -901,6 +933,39 @@ export default {
     removeFile(file) {
       this.uploadedFiles = this.uploadedFiles.filter(f => f !== file);
     },
+    handleAvatarUpload(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      
+      // Validate file size (5MB max)
+      if (file.size > 5 * 1024 * 1024) {
+        alert('File size must be less than 5MB');
+        return;
+      }
+      
+      // Validate file type
+      const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp'];
+      if (!allowedTypes.includes(file.type)) {
+        alert('Please select a valid image file (PNG, JPG, GIF, WEBP)');
+        return;
+      }
+      
+      // Store file and create preview
+      this.newTraining.avatarFile = file;
+      
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        this.newTraining.avatarPreview = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    },
+    removeAvatar() {
+      this.newTraining.avatarFile = null;
+      this.newTraining.avatarPreview = null;
+      if (this.$refs.avatarInput) {
+        this.$refs.avatarInput.value = '';
+      }
+    },
     async createTrainingJob() {
       try {
         // Process custom capabilities
@@ -929,13 +994,27 @@ export default {
         };
 
         // Call backend API to create training job
-        const response = await fetch('http://localhost:5000/api/training-jobs', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(trainingData)
-        });
+        let response;
+        if (this.newTraining.avatarFile) {
+          // Use FormData for avatar upload
+          const formData = new FormData();
+          formData.append('trainingData', JSON.stringify(trainingData));
+          formData.append('avatar', this.newTraining.avatarFile);
+          
+          response = await fetch('http://localhost:5000/api/training-jobs', {
+            method: 'POST',
+            body: formData
+          });
+        } else {
+          // Regular JSON request
+          response = await fetch('http://localhost:5000/api/training-jobs', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(trainingData)
+          });
+        }
 
         const result = await response.json();
 
@@ -1755,6 +1834,87 @@ export default {
   display: flex;
   justify-content: flex-end;
   gap: 1rem;
+}
+
+/* Avatar Upload */
+.avatar-upload {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  align-items: center;
+  padding: 1.5rem;
+  border: 2px dashed var(--border-color);
+  border-radius: 12px;
+  background: var(--card-bg);
+  transition: all 0.3s ease;
+}
+
+.avatar-upload:hover {
+  border-color: var(--primary-color);
+  background: var(--hover-bg);
+}
+
+.avatar-preview {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+.preview-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.remove-avatar {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--danger-color);
+  color: white;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+}
+
+.avatar-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-muted);
+}
+
+.avatar-input {
+  display: none;
+}
+
+.avatar-upload-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  background: var(--primary-color);
+  color: white;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-weight: 500;
+}
+
+.avatar-upload-btn:hover {
+  background: var(--primary-hover);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
 }
 
 /* Training Type Cards */

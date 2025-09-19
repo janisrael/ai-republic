@@ -255,21 +255,46 @@
           
           <!-- Custom Dataset Input -->
           <div class="custom-dataset">
-            <h3>🔗 Custom Dataset ID</h3>
+            <h3>🔗 Custom Dataset</h3>
             <div class="form-group">
-              <label>Enter Hugging Face Dataset ID</label>
+              <label>Dataset Name <span class="required">*</span></label>
               <input 
                 type="text" 
-                v-model="customDatasetId" 
+                v-model="customDataset.name" 
+                placeholder="e.g., My Custom Code Dataset"
+                class="dataset-input"
+                required
+              >
+              <small>Give your dataset a descriptive name</small>
+            </div>
+            
+            <div class="form-group">
+              <label>Description</label>
+              <textarea 
+                v-model="customDataset.description" 
+                placeholder="Describe what this dataset contains and its purpose..."
+                class="dataset-input"
+                rows="3"
+              ></textarea>
+              <small>Optional description of the dataset content and use case</small>
+            </div>
+            
+            <div class="form-group">
+              <label>Hugging Face Dataset ID <span class="required">*</span></label>
+              <input 
+                type="text" 
+                v-model="customDataset.datasetId" 
                 placeholder="e.g., sahil2801/CodeAlpaca-20k"
                 class="dataset-input"
+                required
               >
               <small>Find datasets at <a href="https://huggingface.co/datasets" target="_blank">huggingface.co/datasets</a></small>
             </div>
+            
             <button 
               class="btn btn-secondary" 
-              @click="loadSpecificDataset(customDatasetId)"
-              :disabled="!customDatasetId.trim() || isLoadingHF"
+              @click="loadCustomDataset"
+              :disabled="!customDataset.name.trim() || !customDataset.datasetId.trim() || isLoadingHF"
             >
               <i>{{ isLoadingHF ? '⏳' : '📥' }}</i> Load Custom Dataset
             </button>
@@ -317,6 +342,11 @@ export default {
       isLoadingHF: false,
       showHuggingFaceModal: false,
       customDatasetId: '',
+      customDataset: {
+        name: '',
+        description: '',
+        datasetId: ''
+      },
       files: [],
       datasetToDelete: null,
       newDataset: {
@@ -742,6 +772,58 @@ export default {
         }
       } catch (error) {
         console.error('Error loading from Hugging Face:', error);
+        this.showError('Failed to connect to backend. Make sure the API server is running.');
+      } finally {
+        this.isLoadingHF = false;
+      }
+    },
+    
+    async loadCustomDataset() {
+      if (!this.customDataset.name.trim() || !this.customDataset.datasetId.trim()) {
+        this.showError('Please provide both dataset name and Hugging Face dataset ID');
+        return;
+      }
+      
+      this.isLoadingHF = true;
+      this.showHuggingFaceModal = false;
+      
+      try {
+        console.log(`Loading custom dataset: ${this.customDataset.datasetId}`);
+        
+        // Call backend API to load dataset with custom name and description
+        const response = await fetch('http://localhost:5000/api/load-dataset', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ 
+            dataset_id: this.customDataset.datasetId,
+            custom_name: this.customDataset.name,
+            custom_description: this.customDataset.description
+          })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+          // Store the name before resetting
+          const datasetName = this.customDataset.name;
+          
+          // Reset the form
+          this.customDataset = {
+            name: '',
+            description: '',
+            datasetId: ''
+          };
+          
+          // Refresh datasets list
+          await this.fetchDatasets();
+          this.showSuccessMessage(`Successfully loaded "${datasetName}" from Hugging Face!`);
+        } else {
+          this.showError(`Failed to load dataset: ${result.error}`);
+        }
+      } catch (error) {
+        console.error('Error loading custom dataset:', error);
         this.showError('Failed to connect to backend. Make sure the API server is running.');
       } finally {
         this.isLoadingHF = false;
@@ -1244,18 +1326,36 @@ ease;
 
 /* Modal styles */
 .modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
   background-color: rgba(0, 0, 0, 0.5);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 1000;
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+  z-index: 1000 !important;
   padding: 1rem;
   backdrop-filter: blur(2px);
+  box-sizing: border-box;
+}
+
+.modal {
+  background: white;
+  border-radius: 8px;
+  width: 100%;
+  max-width: 600px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  animation: modalFadeIn 0.2s ease-out;
+  overflow: hidden;
+  position: relative;
+  margin: auto;
 }
 
 .modal-content {
@@ -1738,6 +1838,48 @@ textarea.form-control {
   margin-top: 2rem;
   padding-top: 2rem;
   border-top: 1px solid #e9ecef;
+}
+
+.required {
+  color: #e74c3c;
+  font-weight: bold;
+}
+
+.form-group {
+  margin-bottom: 1.5rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+  color: #333;
+}
+
+.form-group small {
+  display: block;
+  margin-top: 0.25rem;
+  color: #666;
+  font-size: 0.85rem;
+}
+
+.dataset-input {
+  width: 100%;
+  padding: 0.75rem;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  font-size: 1rem;
+  transition: border-color 0.3s ease;
+}
+
+.dataset-input:focus {
+  outline: none;
+  border-color: #4e73df;
+  box-shadow: 0 0 0 3px rgba(78, 115, 223, 0.1);
+}
+
+.dataset-input[required] {
+  border-left: 4px solid #e74c3c;
 }
 
 .custom-dataset h3 {
