@@ -17,7 +17,15 @@
         <div v-else-if="currentJob.status === 'FAILED'" class="error-status">
           <span class="error-icon">❌</span>
           <span>Training failed</span>
-          <p class="error-details">{{ currentJob.errorMessage || 'Unknown error occurred' }}</p>
+          <div class="error-details">
+            <p><strong>Error:</strong> {{ currentJob.errorMessage || 'Unknown error occurred' }}</p>
+            <p v-if="currentJob.progress > 0" class="progress-info">
+              <strong>Progress:</strong> {{ Math.round(currentJob.progress * 100) }}% completed before failure
+            </p>
+            <p class="retry-suggestion">
+              <strong>Suggestions:</strong> Check dataset format, ensure base model exists, or try with different parameters
+            </p>
+          </div>
         </div>
         
         <div v-else-if="currentJob.status === 'COMPLETED'" class="success-status">
@@ -63,7 +71,70 @@ export default {
       default: null
     }
   },
+  data() {
+    return {
+      statusPollingInterval: null,
+      lastStatus: null
+    }
+  },
+  watch: {
+    currentJob: {
+      handler(newJob) {
+        if (newJob) {
+          this.startStatusPolling();
+          this.lastStatus = newJob.status;
+        } else {
+          this.stopStatusPolling();
+        }
+      },
+      immediate: true
+    }
+  },
+  beforeUnmount() {
+    this.stopStatusPolling();
+  },
   methods: {
+    startStatusPolling() {
+      if (!this.currentJob || this.currentJob.status === 'COMPLETED' || this.currentJob.status === 'FAILED') {
+        return; // Don't poll for completed/failed jobs
+      }
+      
+      this.statusPollingInterval = setInterval(async () => {
+        try {
+          const response = await fetch(`http://localhost:5000/api/training-jobs/${this.currentJob.id}/status`);
+          const result = await response.json();
+          
+          if (result.success && result.status) {
+            const newStatus = result.status.status;
+            
+            // Only emit if status changed (RUNNING -> FAILED/COMPLETED)
+            if (newStatus !== this.lastStatus) {
+              this.lastStatus = newStatus;
+              
+              // Emit status change to parent component
+              this.$emit('status-changed', {
+                jobId: this.currentJob.id,
+                newStatus: newStatus,
+                jobData: result.status
+              });
+              
+              // Stop polling once status changes to final state
+              this.stopStatusPolling();
+            }
+          }
+        } catch (error) {
+          console.error('Error polling job status:', error);
+        }
+      }, 3000); // Poll every 3 seconds - only for status changes, not progress
+    },
+    
+    stopStatusPolling() {
+      if (this.statusPollingInterval) {
+        clearInterval(this.statusPollingInterval);
+        this.statusPollingInterval = null;
+      }
+    },
+    
     getStatusClass(status) {
       switch (status) {
         case 'RUNNING':
@@ -269,7 +340,26 @@ export default {
   margin: 8px 0 0 0;
   font-size: 0.85rem;
   color: var(--text-secondary);
-  font-style: italic;
+  line-height: 1.4;
+}
+
+.error-details p {
+  margin: 6px 0;
+}
+
+.error-details strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.progress-info {
+  color: var(--warning-color, #f59e0b);
+}
+
+.retry-suggestion {
+  color: var(--info-color, #3b82f6);
+  font-size: 0.8rem;
+  margin-top: 8px;
 }
 
 .success-status {

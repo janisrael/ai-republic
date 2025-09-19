@@ -107,7 +107,8 @@ def load_new_dataset():
                     'loaded_at': result['loaded_at'],
                     'split_used': result.get('split_used', 'train'),
                     'samples_preview': result['samples'][:10],  # Store first 10 samples as preview
-                    'all_samples': result['samples']  # Store all samples for training
+                    'all_samples': result['samples'],  # Store all samples for training
+                    'format_analysis': result['metadata'].get('format_analysis')  # Include format analysis!
                 }
             }
             

@@ -491,16 +491,22 @@
     </div>
 
     <!-- Real-time Training Output Component -->
+    <TrainingOutput 
+      :currentJob="selectedJob" 
+      @status-changed="handleStatusChange"
+    />
   </div>
 </template>
 
 <script>
 import Icon from '../components/Icon.vue';
+import TrainingOutput from '../components/TrainingOutput.vue';
 import { io } from 'socket.io-client';
 export default {
   name: 'TrainingView',
   components: {
-    Icon
+    Icon,
+    TrainingOutput
   },
   data() {
     return {
@@ -537,7 +543,8 @@ export default {
         }
       },
       trainingJobs: [],
-      chromadbCollections: 0
+      chromadbCollections: 0,
+      selectedJob: null
     };
   },
   computed: {
@@ -741,6 +748,31 @@ export default {
         // Don't show error to user, just log it
       }
     },
+    
+    handleStatusChange(event) {
+      console.log('🔄 Job status changed:', event);
+      
+      // Find and update the job in the training jobs list
+      const jobIndex = this.trainingJobs.findIndex(job => job.id === event.jobId.toString());
+      if (jobIndex !== -1) {
+        this.trainingJobs[jobIndex].status = event.newStatus;
+        this.trainingJobs[jobIndex].errorMessage = event.jobData?.error_message || null;
+        
+        // Update selected job if it matches
+        if (this.selectedJob && this.selectedJob.id === event.jobId.toString()) {
+          this.selectedJob.status = event.newStatus;
+          this.selectedJob.errorMessage = event.jobData?.error_message || null;
+        }
+        
+        // Show notification based on status
+        if (event.newStatus === 'COMPLETED') {
+          this.showSuccessMessage(`✅ Training completed for "${this.trainingJobs[jobIndex].jobName}"!`);
+        } else if (event.newStatus === 'FAILED') {
+          this.showError(`❌ Training failed for "${this.trainingJobs[jobIndex].jobName}"`);
+        }
+      }
+    },
+    
     getDatasetName(datasetId) {
       const dataset = this.availableDatasets.find(d => d.id === datasetId);
       return dataset ? dataset.name : 'Unknown Dataset';
@@ -1019,6 +1051,12 @@ export default {
         
         if (result.success) {
           this.showSuccessMessage(`Real training started for job ${jobId}!`);
+          
+          // Set this job as the selected job for the TrainingOutput component
+          const job = this.trainingJobs.find(j => j.id === jobId.toString());
+          if (job) {
+            this.selectedJob = { ...job, status: 'RUNNING' };
+          }
           
           // Wait a moment for backend to update status, then refresh
           setTimeout(() => {

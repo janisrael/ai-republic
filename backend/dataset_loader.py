@@ -67,6 +67,172 @@ def load_javascript_dataset() -> Dict[str, Any]:
         print(f"JavaScript dataset not available: {e}")
         return None
 
+def check_and_convert_dataset_format(sample_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Check dataset format and convert to standard LoRA format if needed
+    Returns format analysis and converted samples
+    """
+    if not sample_data:
+        return {
+            'format_type': 'empty',
+            'is_lora_compatible': False,
+            'converted_samples': [],
+            'conversion_applied': False,
+            'format_analysis': 'No samples found'
+        }
+    
+    # Analyze first sample to determine format
+    first_sample = sample_data[0]
+    sample_keys = list(first_sample.keys())
+    
+    print(f"📊 Analyzing dataset format. Sample keys: {sample_keys}")
+    
+    # Check if it's already in standard LoRA format
+    if 'instruction' in sample_keys and 'output' in sample_keys:
+        print("✅ Dataset is already in standard LoRA format")
+        return {
+            'format_type': 'standard_lora',
+            'is_lora_compatible': True,
+            'converted_samples': sample_data,
+            'conversion_applied': False,
+            'format_analysis': 'Standard LoRA format (instruction/output fields)'
+        }
+    
+    # Check if it's in Devops format (content field with JSON string)
+    if 'content' in sample_keys:
+        print("🔄 Converting Devops format to LoRA format...")
+        converted_samples = []
+        conversion_count = 0
+        
+        for sample in sample_data:
+            try:
+                # Parse the content field
+                content = sample.get('content', '')
+                if isinstance(content, str):
+                    # Try to parse as JSON string
+                    import ast
+                    try:
+                        # Handle single quotes in JSON-like string
+                        content_dict = ast.literal_eval(content)
+                        
+                        # Extract fields with various possible names
+                        instruction = (content_dict.get('Instruction') or 
+                                     content_dict.get('instruction') or 
+                                     content_dict.get('Prompt') or 
+                                     content_dict.get('prompt') or '')
+                        
+                        output = (content_dict.get('Response') or 
+                                content_dict.get('response') or 
+                                content_dict.get('Output') or 
+                                content_dict.get('output') or '')
+                        
+                        if instruction and output:
+                            converted_sample = {
+                                'id': sample.get('id', ''),
+                                'instruction': instruction,
+                                'output': output,
+                                'input': content_dict.get('input', ''),
+                                'system': content_dict.get('system', ''),
+                                'source': sample.get('source', ''),
+                                'type': sample.get('type', 'Text')
+                            }
+                            converted_samples.append(converted_sample)
+                            conversion_count += 1
+                        else:
+                            print(f"⚠️ Skipping sample {sample.get('id', 'unknown')}: missing instruction or output")
+                    except (ValueError, SyntaxError) as e:
+                        print(f"⚠️ Failed to parse content for sample {sample.get('id', 'unknown')}: {e}")
+                        continue
+                else:
+                    print(f"⚠️ Content field is not a string for sample {sample.get('id', 'unknown')}")
+                    continue
+            except Exception as e:
+                print(f"⚠️ Error converting sample {sample.get('id', 'unknown')}: {e}")
+                continue
+        
+        print(f"✅ Converted {conversion_count} out of {len(sample_data)} samples")
+        
+        return {
+            'format_type': 'devops_format',
+            'is_lora_compatible': len(converted_samples) > 0,
+            'converted_samples': converted_samples,
+            'conversion_applied': True,
+            'format_analysis': f'Devops format converted to LoRA format ({conversion_count}/{len(sample_data)} samples)',
+            'conversion_stats': {
+                'total_samples': len(sample_data),
+                'converted_samples': conversion_count,
+                'failed_samples': len(sample_data) - conversion_count
+            }
+        }
+    
+    # Check for other possible formats
+    if 'question' in sample_keys and 'answer' in sample_keys:
+        print("🔄 Converting Q&A format to LoRA format...")
+        converted_samples = []
+        
+        for sample in sample_data:
+            converted_sample = {
+                'id': sample.get('id', ''),
+                'instruction': sample.get('question', ''),
+                'output': sample.get('answer', ''),
+                'input': '',
+                'system': '',
+                'source': sample.get('source', ''),
+                'type': sample.get('type', 'Text')
+            }
+            converted_samples.append(converted_sample)
+        
+        return {
+            'format_type': 'qa_format',
+            'is_lora_compatible': True,
+            'converted_samples': converted_samples,
+            'conversion_applied': True,
+            'format_analysis': f'Q&A format converted to LoRA format ({len(converted_samples)} samples)'
+        }
+    
+    # Unknown format - try to extract any available fields
+    print("⚠️ Unknown format detected. Attempting basic conversion...")
+    converted_samples = []
+    
+    for sample in sample_data:
+        # Try to find instruction-like and output-like fields
+        instruction_fields = ['text', 'input', 'prompt', 'question']
+        output_fields = ['response', 'answer', 'code', 'solution']
+        
+        instruction = ''
+        output = ''
+        
+        for field in instruction_fields:
+            if field in sample and sample[field]:
+                instruction = str(sample[field])
+                break
+        
+        for field in output_fields:
+            if field in sample and sample[field]:
+                output = str(sample[field])
+                break
+        
+        if instruction or output:
+            converted_sample = {
+                'id': sample.get('id', ''),
+                'instruction': instruction,
+                'output': output,
+                'input': '',
+                'system': '',
+                'source': sample.get('source', ''),
+                'type': sample.get('type', 'Text')
+            }
+            converted_samples.append(converted_sample)
+    
+    return {
+        'format_type': 'unknown_format',
+        'is_lora_compatible': len(converted_samples) > 0,
+        'converted_samples': converted_samples,
+        'conversion_applied': True,
+        'format_analysis': f'Unknown format - basic conversion attempted ({len(converted_samples)} samples converted)',
+        'available_fields': sample_keys
+    }
+
 def load_any_dataset(dataset_id: str, max_samples: int = 1000) -> Dict[str, Any]:
     """Load any Hugging Face dataset by ID or local file"""
     try:
@@ -122,9 +288,27 @@ def load_any_dataset(dataset_id: str, max_samples: int = 1000) -> Dict[str, Any]
             
             sample_data.append(sample_item)
         
+        # 🎯 NEW: Check and convert dataset format
+        print("🔍 Checking dataset format compatibility...")
+        format_analysis = check_and_convert_dataset_format(sample_data)
+        
+        # Use converted samples if conversion was applied
+        if format_analysis['conversion_applied']:
+            sample_data = format_analysis['converted_samples']
+            print(f"✅ Format conversion applied: {format_analysis['format_analysis']}")
+        else:
+            print(f"ℹ️ No conversion needed: {format_analysis['format_analysis']}")
+        
         # Estimate size
         avg_sample_size = len(str(sample_data[0])) if sample_data else 0
         estimated_size = (avg_sample_size * total_samples) / (1024 * 1024)  # MB
+        
+        # Prepare metadata with format analysis
+        metadata = {
+            'format_analysis': format_analysis,
+            'all_samples': sample_data,
+            'split_used': split_name
+        }
         
         return {
             'success': True,
@@ -136,8 +320,10 @@ def load_any_dataset(dataset_id: str, max_samples: int = 1000) -> Dict[str, Any]
             'samples': sample_data,
             'format': 'Hugging Face Dataset',
             'size': f'{estimated_size:.1f} MB (estimated)',
-            'split_used': split_name,
-            'loaded_at': time.strftime('%Y-%m-%d %H:%M:%S')
+            'loaded_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+            'metadata': metadata,
+            'is_lora_compatible': format_analysis['is_lora_compatible'],
+            'format_type': format_analysis['format_type']
         }
         
     except Exception as e:

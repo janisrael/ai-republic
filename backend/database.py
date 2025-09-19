@@ -126,7 +126,7 @@ class Database:
             return dataset_id
     
     def get_all_datasets(self) -> List[Dict[str, Any]]:
-        """Get all datasets from the database"""
+        """Get all datasets from the database (lightweight version for API)"""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -139,7 +139,19 @@ class Database:
                 dataset = dict(row)
                 # Parse JSON fields
                 dataset['tags'] = json.loads(dataset['tags']) if dataset['tags'] else []
-                dataset['metadata'] = json.loads(dataset['metadata']) if dataset['metadata'] else {}
+                
+                # Parse metadata but remove heavy fields for API response
+                metadata = json.loads(dataset['metadata']) if dataset['metadata'] else {}
+                
+                # Keep only essential metadata fields
+                lightweight_metadata = {
+                    'loaded_at': metadata.get('loaded_at'),
+                    'split_used': metadata.get('split_used'),
+                    'format_analysis': metadata.get('format_analysis'),  # Include format analysis!
+                    'samples_preview': metadata.get('samples_preview', [])[:5]  # Only first 5 samples for preview
+                }
+                
+                dataset['metadata'] = lightweight_metadata
                 datasets.append(dataset)
             
             return datasets

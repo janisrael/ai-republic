@@ -94,6 +94,10 @@
             <span class="emoji">📅</span>
             <span>{{ formatDate(dataset.createdAt) }}</span>
           </div>
+          <div class="stat" v-if="dataset.formatAnalysis">
+            <span class="emoji">{{ getFormatEmoji(dataset.formatAnalysis.format_type) }}</span>
+            <span>{{ getFormatStatus(dataset.formatAnalysis) }}</span>
+          </div>
         </div>
         
         <div class="dataset-tags">
@@ -395,22 +399,38 @@ export default {
         
         if (result.success) {
           // Transform database format to frontend format
-          this.datasets = result.datasets.map(dataset => ({
-            id: dataset.id.toString(),
-            name: dataset.name,
-            description: dataset.description,
-            type: dataset.type,
-            sampleCount: dataset.sample_count,
-            createdAt: dataset.created_at,
-            tags: dataset.tags || [],
-            isFavorite: Boolean(dataset.is_favorite),
-            lastModified: dataset.last_modified,
-            size: dataset.size,
-            format: dataset.format,
-            license: dataset.license,
-            datasetId: dataset.dataset_id,
-            source: dataset.source
-          }));
+          this.datasets = result.datasets.map(dataset => {
+            // Parse metadata to get format analysis
+            let formatAnalysis = null;
+            if (dataset.metadata) {
+              try {
+                const metadata = typeof dataset.metadata === 'string' 
+                  ? JSON.parse(dataset.metadata) 
+                  : dataset.metadata;
+                formatAnalysis = metadata.format_analysis || null;
+              } catch (e) {
+                console.warn('Failed to parse dataset metadata:', e);
+              }
+            }
+            
+            return {
+              id: dataset.id.toString(),
+              name: dataset.name,
+              description: dataset.description,
+              type: dataset.type,
+              sampleCount: dataset.sample_count,
+              createdAt: dataset.created_at,
+              tags: dataset.tags || [],
+              isFavorite: Boolean(dataset.is_favorite),
+              lastModified: dataset.last_modified,
+              size: dataset.size,
+              format: dataset.format,
+              license: dataset.license,
+              datasetId: dataset.dataset_id,
+              source: dataset.source,
+              formatAnalysis: formatAnalysis
+            };
+          });
           
           console.log(`Loaded ${this.datasets.length} datasets from API`);
         } else {
@@ -442,9 +462,8 @@ export default {
       }
     },
     
-    viewDataset(id) {
+    viewDataset(dataset) {
       // In a real app, this would navigate to a detailed view
-      const dataset = this.datasets.find(d => d.id === id);
       console.log('Viewing dataset:', dataset);
       // For now, just show an alert
       alert(`Viewing dataset: ${dataset.name}\n\n` +
@@ -642,6 +661,31 @@ export default {
       const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
       const i = Math.floor(Math.log(bytes) / Math.log(k));
       return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    },
+    
+    getFormatEmoji(formatType) {
+      const formatEmojis = {
+        'standard_lora': '✅',
+        'devops_format': '🔄',
+        'qa_format': '❓',
+        'unknown_format': '⚠️',
+        'empty': '❌'
+      };
+      return formatEmojis[formatType] || '📋';
+    },
+    
+    getFormatStatus(formatAnalysis) {
+      if (!formatAnalysis) return 'Unknown Format';
+      
+      if (formatAnalysis.format_type === 'standard_lora') {
+        return 'LoRA Ready';
+      } else if (formatAnalysis.conversion_applied) {
+        return `Converted (${formatAnalysis.format_type})`;
+      } else if (formatAnalysis.is_lora_compatible) {
+        return 'LoRA Compatible';
+      } else {
+        return 'Format Issue';
+      }
     },
     
     closeModal() {
@@ -1109,11 +1153,17 @@ ease;
 }
 
 .dataset-samples,
-.dataset-date {
+.dataset-date,
+.dataset-format {
   display: flex;
   align-items: center;
   gap: 0.25rem;
   font-size: 0.8rem;
+}
+
+.dataset-format {
+  color: #4a6cf7;
+  font-weight: 500;
 }
 
 .dataset-tags {
