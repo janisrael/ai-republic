@@ -183,6 +183,9 @@
           >
             <div class="rank-number">
               <span class="rank-badge" :class="getRankClass(index)">{{ index + 1 }}</span>
+              <button class="chat-test-btn" @click="openChatModal(model)" title="Test Model">
+                <span class="material-icons-round">chat</span>
+              </button>
             </div>
             <div class="model-info">
               <h4>{{ model.name }}</h4>
@@ -530,7 +533,21 @@
       <div class="modal-content neumorphic-card model-details-modal">
         <div class="modal-header">
           <h2>Model Details: {{ selectedModelForDetails?.name }}</h2>
-          <button class="btn-icon" @click="showModelDetailsModal = false">✕</button>
+          <div class="modal-actions">
+            <button class="btn btn-secondary" @click="toggleEditMode" v-if="!isEditingModel">
+              <span class="material-icons-round">edit</span>
+              Edit
+            </button>
+            <button class="btn btn-primary" @click="saveModelChanges" v-if="isEditingModel">
+              <span class="material-icons-round">save</span>
+              Save
+            </button>
+            <button class="btn btn-secondary" @click="cancelEditMode" v-if="isEditingModel">
+              <span class="material-icons-round">cancel</span>
+              Cancel
+            </button>
+            <button class="btn-icon" @click="showModelDetailsModal = false">✕</button>
+          </div>
         </div>
         
         <div class="modal-body">
@@ -606,21 +623,102 @@
             <!-- System Prompt -->
             <div v-if="selectedModelForDetails.details?.system_prompt" class="detail-section">
               <h4>System Prompt</h4>
-              <div class="system-prompt">
+              <div class="system-prompt" v-if="!isEditingModel">
                 <p>{{ selectedModelForDetails.details.system_prompt }}</p>
+              </div>
+              <div v-else class="editable-prompt">
+                <textarea 
+                  v-model="editableSystemPrompt"
+                  class="form-control prompt-textarea"
+                  rows="8"
+                  placeholder="Enter system prompt..."
+                ></textarea>
+                <div class="prompt-actions">
+                  <button class="btn btn-sm btn-secondary" @click="resetPrompt">
+                    <span class="material-icons-round">refresh</span>
+                    Reset
+                  </button>
+                  <span class="char-count">{{ editableSystemPrompt.length }} characters</span>
+                </div>
               </div>
             </div>
 
             <!-- Description -->
-            <div v-if="selectedModelForDetails.description" class="detail-section">
+            <div class="detail-section">
               <h4>Description</h4>
-              <p>{{ selectedModelForDetails.description }}</p>
+              <div v-if="!isEditingModel">
+                <p>{{ selectedModelForDetails.description || 'No description provided' }}</p>
+              </div>
+              <div v-else class="editable-description">
+                <textarea 
+                  v-model="editableDescription"
+                  class="form-control"
+                  rows="3"
+                  placeholder="Enter model description..."
+                ></textarea>
+              </div>
             </div>
           </div>
         </div>
         
         <div class="modal-footer">
           <button class="btn btn-secondary" @click="showModelDetailsModal = false">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chat Test Modal -->
+    <div v-if="showChatModal" class="chat-modal-overlay" @click.self="closeChatModal">
+      <div class="chat-modal-content">
+        <div class="chat-header">
+          <div class="chat-model-info">
+            <span class="material-icons-round">smart_toy</span>
+            <h3>{{ selectedChatModel?.name }}</h3>
+            <span class="model-type">{{ selectedChatModel?.type }}</span>
+          </div>
+          <button class="btn-icon" @click="closeChatModal">✕</button>
+        </div>
+        
+        <div class="chat-terminal">
+          <div class="terminal-header">
+            <div class="terminal-controls">
+              <span class="control-dot red"></span>
+              <span class="control-dot yellow"></span>
+              <span class="control-dot green"></span>
+            </div>
+            <span class="terminal-title">Model Test Terminal</span>
+          </div>
+          
+          <div class="terminal-body" ref="terminalBody">
+            <div class="terminal-output">
+              <div v-for="(message, index) in chatMessages" :key="index" class="message" :class="message.type">
+                <span class="message-prefix">{{ message.prefix }}</span>
+                <span class="message-content">{{ message.content }}</span>
+              </div>
+              <div v-if="isGenerating" class="message generating">
+                <span class="message-prefix">{{ selectedChatModel?.name }}:</span>
+                <span class="message-content typing-indicator">
+                  <span class="typing-dot"></span>
+                  <span class="typing-dot"></span>
+                  <span class="typing-dot"></span>
+                </span>
+              </div>
+            </div>
+          </div>
+          
+          <div class="terminal-input">
+            <div class="input-line">
+              <span class="prompt-symbol">$</span>
+              <input 
+                v-model="chatInput" 
+                @keyup.enter="sendMessage"
+                :disabled="isGenerating"
+                placeholder="Type your message..."
+                class="terminal-input-field"
+                ref="chatInput"
+              />
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -643,6 +741,11 @@ export default {
       showTestModal: false,
       showModelDetailsModal: false,
       selectedModelForDetails: null,
+      isEditingModel: false,
+      editableSystemPrompt: '',
+      editableDescription: '',
+      originalSystemPrompt: '',
+      originalDescription: '',
       editingModel: null,
       modelToDelete: null,
       selectedModel: null,
@@ -1013,7 +1116,104 @@ export default {
     viewModelDetails(model) {
       this.selectedModelForDetails = model;
       this.showModelDetailsModal = true;
+      this.isEditingModel = false;
+      // Initialize editable values
+      this.editableSystemPrompt = model.details?.system_prompt || '';
+      this.editableDescription = model.description || '';
+      this.originalSystemPrompt = model.details?.system_prompt || '';
+      this.originalDescription = model.description || '';
       console.log('Viewing model details:', model);
+    },
+    
+    toggleEditMode() {
+      this.isEditingModel = true;
+    },
+    
+    cancelEditMode() {
+      this.isEditingModel = false;
+      // Reset to original values
+      this.editableSystemPrompt = this.originalSystemPrompt;
+      this.editableDescription = this.originalDescription;
+    },
+    
+    resetPrompt() {
+      this.editableSystemPrompt = this.originalSystemPrompt;
+    },
+    
+    async saveModelChanges() {
+      try {
+        // Show loading state
+        const saveButton = document.querySelector('.btn-primary');
+        if (saveButton) {
+          saveButton.disabled = true;
+          saveButton.innerHTML = '<span class="material-icons-round">refresh</span> Saving...';
+        }
+        
+        // Prepare data for API call
+        const updateData = {
+          system_prompt: this.editableSystemPrompt,
+          temperature: this.selectedModelForDetails.details?.temperature,
+          top_p: this.selectedModelForDetails.details?.top_p,
+          description: this.editableDescription
+        };
+        
+        // Call backend API to update the model
+        const response = await fetch(`http://localhost:5000/api/models/${encodeURIComponent(this.selectedModelForDetails.name)}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(updateData)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+          // Update the model in the local array
+          const modelIndex = this.models.findIndex(m => m.name === this.selectedModelForDetails.name);
+          if (modelIndex !== -1) {
+            // Update local model data
+            this.models[modelIndex].description = this.editableDescription;
+            if (this.models[modelIndex].details) {
+              this.models[modelIndex].details.system_prompt = this.editableSystemPrompt;
+            }
+            
+            // Update the selected model for display
+            this.selectedModelForDetails.description = this.editableDescription;
+            if (this.selectedModelForDetails.details) {
+              this.selectedModelForDetails.details.system_prompt = this.editableSystemPrompt;
+            }
+            
+            // Update original values
+            this.originalSystemPrompt = this.editableSystemPrompt;
+            this.originalDescription = this.editableDescription;
+            
+            this.isEditingModel = false;
+            
+            // Show success message
+            console.log('Model changes saved successfully:', result.message);
+            
+            // Refresh the models list to get updated data
+            await this.fetchLocalModels();
+            
+          } else {
+            console.error('Model not found in local array');
+          }
+        } else {
+          throw new Error(result.error || 'Failed to save model changes');
+        }
+        
+      } catch (error) {
+        console.error('Error saving model changes:', error);
+        alert(`Failed to save changes: ${error.message}`);
+      } finally {
+        // Reset button state
+        const saveButton = document.querySelector('.btn-primary');
+        if (saveButton) {
+          saveButton.disabled = false;
+          saveButton.innerHTML = '<span class="material-icons-round">save</span> Save';
+        }
+      }
     },
     
     toggleModelFavorite(model) {
@@ -1977,6 +2177,74 @@ export default {
   color: #333;
   line-height: 1.5;
   white-space: pre-wrap;
+}
+
+/* Modal Actions */
+.modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Editable Prompt */
+.editable-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.prompt-textarea {
+  font-family: 'Courier New', monospace;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  resize: vertical;
+  min-height: 200px;
+  border: 2px solid #e9ecef;
+  border-radius: 8px;
+  padding: 1rem;
+  transition: border-color 0.3s ease;
+}
+
+.prompt-textarea:focus {
+  border-color: #4e73df;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(78, 115, 223, 0.1);
+}
+
+.prompt-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.char-count {
+  font-size: 0.8rem;
+  color: #666;
+  font-weight: 500;
+}
+
+/* Editable Description */
+.editable-description textarea {
+  resize: vertical;
+  min-height: 80px;
+  border: 2px solid #e9ecef;
+  border-radius: 8px;
+  padding: 0.75rem;
+  transition: border-color 0.3s ease;
+}
+
+.editable-description textarea:focus {
+  border-color: #4e73df;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(78, 115, 223, 0.1);
+}
+
+/* Edit Mode Styling */
+.detail-section.editing {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 1rem;
+  border: 1px solid #e9ecef;
 }
 
 /* Responsive */

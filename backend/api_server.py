@@ -903,6 +903,94 @@ def get_ollama_models():
             'error': str(e)
         }), 500
 
+@app.route('/api/models/<path:model_name>', methods=['PUT'])
+def update_model(model_name):
+    """Update an Ollama model's system prompt and parameters"""
+    try:
+        data = request.get_json()
+        system_prompt = data.get('system_prompt', '')
+        temperature = data.get('temperature')
+        top_p = data.get('top_p')
+        description = data.get('description', '')
+        
+        if not system_prompt:
+            return jsonify({
+                'success': False,
+                'error': 'System prompt is required'
+            }), 400
+        
+        # Get the base model from the current model
+        result = subprocess.run(['ollama', 'show', model_name], capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return jsonify({
+                'success': False,
+                'error': f'Model {model_name} not found'
+            }), 404
+        
+        # Extract base model from the output (look for FROM line)
+        base_model = None
+        for line in result.stdout.split('\n'):
+            if line.strip().startswith('FROM '):
+                base_model = line.strip().split('FROM ')[1].strip()
+                break
+        
+        if not base_model:
+            # Fallback: try to determine base model from model name
+            if ':' in model_name:
+                base_model = model_name.split(':')[0] + ':latest'
+            else:
+                base_model = 'llama3.1:latest'  # Default fallback
+        
+        # Create a new Modelfile with updated system prompt
+        modelfile_content = f"""FROM {base_model}
+
+SYSTEM "{system_prompt}"
+
+# Parameters"""
+        
+        if temperature is not None:
+            modelfile_content += f"\nPARAMETER temperature {temperature}"
+        if top_p is not None:
+            modelfile_content += f"\nPARAMETER top_p {top_p}"
+        
+        # Create temporary Modelfile
+        import tempfile
+        import os
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.Modelfile', delete=False) as f:
+            f.write(modelfile_content)
+            temp_modelfile = f.name
+        
+        try:
+            # Update the model using ollama create (this overwrites the existing model)
+            result = subprocess.run(['ollama', 'create', model_name, '-f', temp_modelfile], 
+                                  capture_output=True, text=True, timeout=30)
+            
+            if result.returncode == 0:
+                return jsonify({
+                    'success': True,
+                    'message': f'Model {model_name} updated successfully',
+                    'system_prompt': system_prompt,
+                    'temperature': temperature,
+                    'top_p': top_p,
+                    'base_model': base_model
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': f'Failed to update model: {result.stderr}'
+                }), 500
+                
+        finally:
+            # Clean up temporary file
+            if os.path.exists(temp_modelfile):
+                os.unlink(temp_modelfile)
+                
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 @app.route('/api/models/<path:model_name>/details', methods=['GET'])
 def get_model_details(model_name):
     """Get detailed information about a specific model"""
