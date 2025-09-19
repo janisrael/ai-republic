@@ -103,7 +103,7 @@ onMounted(() => {
           <a 
             href="#" 
             class="nav-link"
-            :class="{ 'active': activeRoute === 'model-comparison' }"
+            :class="{ 'active': activeRoute === 'modelcomparison' }"
             @click.prevent="navigateTo('ModelComparison')"
           >
             <span class="material-icons-round">compare_arrows</span>
