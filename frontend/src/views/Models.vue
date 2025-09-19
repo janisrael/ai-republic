@@ -183,7 +183,7 @@
           >
             <div class="rank-number">
               <span class="rank-badge" :class="getRankClass(index)">{{ index + 1 }}</span>
-              <button class="chat-test-btn" @click="openChatModal(model)" title="Test Model">
+              <button class="chat-test-btn" @click.stop="openChatModal(model)" title="Test Model">
                 <span class="material-icons-round">chat</span>
               </button>
             </div>
@@ -746,6 +746,11 @@ export default {
       editableDescription: '',
       originalSystemPrompt: '',
       originalDescription: '',
+      showChatModal: false,
+      selectedChatModel: null,
+      chatMessages: [],
+      chatInput: '',
+      isGenerating: false,
       editingModel: null,
       modelToDelete: null,
       selectedModel: null,
@@ -1214,6 +1219,102 @@ export default {
           saveButton.innerHTML = '<span class="material-icons-round">save</span> Save';
         }
       }
+    },
+    
+    openChatModal(model) {
+      this.selectedChatModel = model;
+      this.showChatModal = true;
+      this.chatMessages = [];
+      this.chatInput = '';
+      this.isGenerating = false;
+      
+      // Add welcome message
+      this.chatMessages.push({
+        type: 'system',
+        prefix: 'System:',
+        content: `Connected to ${model.name}. Type your message and press Enter to test the model.`
+      });
+      
+      // Focus input after modal opens
+      this.$nextTick(() => {
+        if (this.$refs.chatInput) {
+          this.$refs.chatInput.focus();
+        }
+      });
+    },
+    
+    closeChatModal() {
+      this.showChatModal = false;
+      this.selectedChatModel = null;
+      this.chatMessages = [];
+      this.chatInput = '';
+      this.isGenerating = false;
+    },
+    
+    async sendMessage() {
+      if (!this.chatInput.trim() || this.isGenerating) return;
+      
+      const userMessage = this.chatInput.trim();
+      this.chatInput = '';
+      
+      // Add user message
+      this.chatMessages.push({
+        type: 'user',
+        prefix: 'You:',
+        content: userMessage
+      });
+      
+      this.isGenerating = true;
+      this.scrollToBottom();
+      
+      try {
+        // Call Ollama API to generate response
+        const response = await fetch('http://localhost:11434/api/generate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: this.selectedChatModel.name,
+            prompt: userMessage,
+            stream: false
+          })
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          const aiResponse = data.response || 'No response generated';
+          
+          // Add AI response
+          this.chatMessages.push({
+            type: 'ai',
+            prefix: `${this.selectedChatModel.name}:`,
+            content: aiResponse
+          });
+        } else {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+      } catch (error) {
+        console.error('Error calling Ollama API:', error);
+        this.chatMessages.push({
+          type: 'error',
+          prefix: 'Error:',
+          content: `Failed to get response: ${error.message}`
+        });
+      } finally {
+        this.isGenerating = false;
+        this.scrollToBottom();
+      }
+    },
+    
+    scrollToBottom() {
+      this.$nextTick(() => {
+        const terminalBody = this.$refs.terminalBody;
+        if (terminalBody) {
+          terminalBody.scrollTop = terminalBody.scrollHeight;
+        }
+      });
     },
     
     toggleModelFavorite(model) {
@@ -2245,6 +2346,259 @@ export default {
   border-radius: 8px;
   padding: 1rem;
   border: 1px solid #e9ecef;
+}
+
+/* Chat Test Button */
+.chat-test-btn {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #4e73df;
+  color: white;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(78, 115, 223, 0.3);
+  transition: all 0.3s ease;
+  z-index: 10;
+}
+
+.chat-test-btn:hover {
+  background: #3d5fc7;
+  transform: scale(1.1);
+  box-shadow: 0 4px 12px rgba(78, 115, 223, 0.4);
+}
+
+.chat-test-btn .material-icons-round {
+  font-size: 16px;
+}
+
+.rank-number {
+  position: relative;
+}
+
+/* Chat Modal */
+.chat-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.chat-modal-content {
+  width: 90%;
+  max-width: 800px;
+  height: 80vh;
+  background: #1e1e1e;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+}
+
+.chat-header {
+  background: #2d2d2d;
+  padding: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #404040;
+}
+
+.chat-model-info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.chat-model-info .material-icons-round {
+  color: #4e73df;
+}
+
+.chat-model-info h3 {
+  margin: 0;
+  color: #fff;
+  font-size: 1.1rem;
+}
+
+.model-type {
+  background: #4e73df;
+  color: white;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+/* Terminal Styling */
+.chat-terminal {
+  height: calc(100% - 80px);
+  display: flex;
+  flex-direction: column;
+}
+
+.terminal-header {
+  background: #333;
+  padding: 0.5rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  border-bottom: 1px solid #404040;
+}
+
+.terminal-controls {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.control-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+.control-dot.red { background: #ff5f56; }
+.control-dot.yellow { background: #ffbd2e; }
+.control-dot.green { background: #27ca3f; }
+
+.terminal-title {
+  color: #ccc;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.terminal-body {
+  flex: 1;
+  background: #1e1e1e;
+  padding: 1rem;
+  overflow-y: auto;
+  font-family: 'Courier New', monospace;
+}
+
+.terminal-output {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.message {
+  display: flex;
+  gap: 0.5rem;
+  line-height: 1.4;
+}
+
+.message-prefix {
+  color: #888;
+  font-weight: bold;
+  min-width: 120px;
+}
+
+.message-content {
+  color: #fff;
+  flex: 1;
+  white-space: pre-wrap;
+}
+
+.message.user .message-prefix {
+  color: #4e73df;
+}
+
+.message.ai .message-prefix {
+  color: #27ca3f;
+}
+
+.message.system .message-prefix {
+  color: #ffbd2e;
+}
+
+.message.error .message-prefix {
+  color: #ff5f56;
+}
+
+.message.error .message-content {
+  color: #ff5f56;
+}
+
+/* Typing Indicator */
+.typing-indicator {
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
+}
+
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  background: #4e73df;
+  border-radius: 50%;
+  animation: typing 1.4s infinite ease-in-out;
+}
+
+.typing-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.typing-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes typing {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.5;
+  }
+  30% {
+    transform: translateY(-10px);
+    opacity: 1;
+  }
+}
+
+/* Terminal Input */
+.terminal-input {
+  background: #2d2d2d;
+  padding: 1rem;
+  border-top: 1px solid #404040;
+}
+
+.input-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.prompt-symbol {
+  color: #4e73df;
+  font-weight: bold;
+  font-family: 'Courier New', monospace;
+}
+
+.terminal-input-field {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: #fff;
+  font-family: 'Courier New', monospace;
+  font-size: 1rem;
+  outline: none;
+}
+
+.terminal-input-field::placeholder {
+  color: #666;
+}
+
+.terminal-input-field:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Responsive */
