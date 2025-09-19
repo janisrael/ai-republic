@@ -8,6 +8,7 @@ const Training = () => import('@/views/Training.vue');
 const Datasets = () => import('@/views/Datasets.vue');
 const Evaluation = () => import('@/views/Evaluation.vue');
 const TrainingHistory = () => import('@/views/TrainingHistory.vue');
+const AIRoom = () => import('@/views/AIRoom.vue');
 
 const routes = [
   {
@@ -55,6 +56,12 @@ const routes = [
     name: 'TrainingHistory',
     component: TrainingHistory,
     meta: { title: 'Training History' }
+  },
+  {
+    path: '/ai-room',
+    name: 'AIRoom',
+    component: AIRoom,
+    meta: { title: 'AI Room' }
   },
   {
     path: '/:pathMatch(.*)*',

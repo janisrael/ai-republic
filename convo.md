@@ -6022,3 +6022,6 @@ python agimat_voice_agent.py
 If you want, I can also add a true Putin-style voice using offline neural TTS for a more realistic sound.
 
 Do you want me to do that next?
+
+Evaluate:
+(92−72)⋅(63−43)(72−42)⋅(53−33)​

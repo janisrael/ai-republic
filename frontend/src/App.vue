@@ -73,7 +73,7 @@ onMounted(() => {
     <aside class="sidebar" :class="{ 'mobile-visible': isMobileMenuOpen }">
       <div class="logo-container">
         <h2>AI Republic</h2>
-        <p>Model Training Dashboard</p>
+        <p>Gotta Train ’Em All.</p>
       </div>
       
       <ul class="nav-menu">
@@ -141,6 +141,17 @@ onMounted(() => {
           >
             <span class="material-icons-round">dataset</span>
             <span>Datasets</span>
+          </a>
+        </li>
+        <li class="nav-item">
+          <a 
+            href="#" 
+            class="nav-link"
+            :class="{ 'active': activeRoute === 'airoom' }"
+            @click.prevent="navigateTo('AIRoom')"
+          >
+            <span class="material-icons-round">chat</span>
+            <span>AI Room</span>
           </a>
         </li>
         <li class="nav-item">
@@ -309,8 +320,10 @@ onMounted(() => {
 
 .logo-container p {
   margin: 0;
-  color: var(--text-muted);
+  /* color: var(--text-muted); */
+  color: #6d6d6d;
   font-size: 0.875rem;
+  font-weight: 600;
 }
 
 /* Mobile Menu Toggle */

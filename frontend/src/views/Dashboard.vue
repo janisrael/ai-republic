@@ -48,10 +48,11 @@
       </div>
     </div>
 
+
     <!-- Recent Activity and Model Performance -->
     <div class="dashboard-row">
       <div class="dashboard-col">
-        <div class="neumorphic-card">
+        <div class="neumorphic-card performance-card">
           <div class="card-header">
             <h3>Recent Activity</h3>
             <button class="btn btn-sm btn-secondary">View All</button>
@@ -858,7 +859,9 @@ export default {
 .stats-card:hover {
   transform: translateY(-5px);
 }
-
+.performance-card {
+  overflow: auto !important;
+}
 .stats-icon {
   width: 60px;
   height: 60px;
@@ -1070,5 +1073,6 @@ export default {
     max-width: 100%;
   }
 }
+
 </style>
 
